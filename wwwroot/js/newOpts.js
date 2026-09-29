@@ -5,6 +5,24 @@ var MainContainer = "PageContainer";
 var jsPopUps = [], ixPopUps = -1, numPopups = 0;
 var cancelPopUpFocus = false;
 
+// CMSMailbox adaptation (2026-09-28): this file runs inside ia-viewer.html, itself
+// embedded in an <iframe> in CMSMailbox's index.html. PopUp()'s modals are plain divs
+// appended into THIS document, so a browser clips/positions them relative to the
+// iframe's own small embedded box, not the real browser viewport — reparenting the
+// popup's DOM into the parent page isn't viable since everything downstream
+// (InteractiveForm.js included) manipulates it via a bare `document.getElementById`
+// that always means this iframe's document. Instead, tell the parent page to grow the
+// <iframe> ELEMENT ITSELF to full-screen while a popup is open (see index.html's
+// message listener) — a no-op, harmlessly, when this file runs directly inside
+// CMSNEO itself (not in an iframe).
+function mbxNotifyPopupState(isOpen) {
+    try {
+        if (window.parent !== window) {
+            window.parent.postMessage({ mbxPopup: isOpen ? "open" : "closed" }, window.location.origin);
+        }
+    } catch (ex) { }
+}
+
 // ============================================================
 // SECTION: popup lifecycle (open/focus/renew/close), PopOut window launch, list-selection popup
 // ============================================================
@@ -131,6 +149,7 @@ function closePopUp(Title, ix) {
     }
     ixPopUps = ix;
     numPopups = jsPopUps.length;
+    mbxNotifyPopupState(jsPopUps.length > 0);
 }
 
 function PopUp(Title, Data, AppendTitle, Scroll, HeightWidth, MC, dontMove) {
@@ -153,6 +172,7 @@ function PopUp(Title, Data, AppendTitle, Scroll, HeightWidth, MC, dontMove) {
         }
 
         jsPopUps.push({ Title: Title, ix: ix * 1, Div: ("PopUp_" + ix).replace(/ /g, ""), Data: Data, AppendTitle: AppendTitle, Scroll: Scroll, HeightWidth: HeightWidth, MC: MC, ZIndex: zindex, dontMove: dontMove });
+        mbxNotifyPopupState(true);
 
         HeightWidth = (HeightWidth == null) ? ["500px", "60%"] : HeightWidth;
         var ht = HeightWidth[0].replace("px", "").replace("%", "") * 1;

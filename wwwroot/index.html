@@ -42,6 +42,45 @@
         .hint { color: #777; font-size: 13px; }
         button.primary { background: #2c6bd6; color: #fff; border: none; border-radius: 4px; padding: 8px 16px; cursor: pointer; }
         button.secondary { background: #eee; border: 1px solid #ccc; border-radius: 4px; padding: 8px 16px; cursor: pointer; }
+        /* ia-viewer.html's ported PopUp() (js/newOpts.js) builds modals as plain divs
+           inside its own iframe document — a browser scopes that content to the
+           iframe's own small embedded box no matter what CSS the popup itself uses.
+           Rather than reparenting popup DOM into this page (which would break every
+           bare `document.getElementById` call the ported code makes internally),
+           the iframe posts us a message when a popup opens/closes and we grow the
+           IFRAME ELEMENT ITSELF to fill the viewport instead — see the message
+           listener below. */
+        /* top starts at 50px, not 0 — InteractiveForm.js's own "Additional Actions"/
+           Save button row (#dispButtons, float:right near the top of the record) would
+           otherwise render directly under our fixed Exit Fullscreen button once the
+           iframe covers the whole viewport. Reserving this strip keeps the iframe's
+           own content entirely below our controls instead of guessing at exact
+           overlap pixels. */
+        .mbx-iframe-fullscreen { position: fixed !important; top: 50px !important; left: 0 !important; width: 100vw !important; height: calc(100vh - 50px) !important; z-index: 99999; margin: 0 !important; border: none !important; background: #fff; }
+        /* Sits above the fullscreened iframe (z-index 99999) as a manual escape hatch —
+           the iframe's own PopUp() close button is the normal way out, but this covers
+           any close path inside that ported code that doesn't route through
+           mbxNotifyPopupState (e.g. navigating away within the iframe without closing
+           the modal first). */
+        /* #c0392b (matches .err elsewhere in this app) instead of #topBar's own navy —
+           the button previously used the exact same navy/white as #topBar behind it
+           and was nearly invisible sitting on top of it. */
+        #mbxExitFullscreenBtn { display: none; position: fixed; top: 12px; right: 12px; z-index: 100000; background: #c0392b; color: #fff; border: none; border-radius: 4px; padding: 8px 14px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.4); font-weight: bold; }
+        /* While any iframe is fullscreen, the reserved 50px top strip (see
+           .mbx-iframe-fullscreen) is the only part of the underlying page still
+           showing — if an itemCard's header happens to render within that strip
+           (e.g. a short message body puts the card near the very top), its own
+           "View Fullscreen" button visibly peeks out next to Exit Fullscreen.
+           Hiding all item headers while fullscreen is simpler and more robust than
+           trying to compute whether a given card's header falls in that strip. */
+        body.mbx-fullscreen-active .mbx-item-header { visibility: hidden; }
+        /* #topBar is a normal-flow element at the very top of the page — its own
+           "Log Out" button (justify-content:space-between pushes it to the right
+           edge) sits almost exactly where our fixed Exit Fullscreen button does,
+           so it visibly peeked out from behind it. #topBar isn't useful while
+           viewing a record fullscreen anyway, so hide it outright rather than
+           trying to carve out just the Log Out button. */
+        body.mbx-fullscreen-active #topBar { visibility: hidden; }
     </style>
 </head>
 <body>
@@ -70,9 +109,11 @@
         </div>
         <div id="layout">
             <div id="inboxList"></div>
-            <div id="messagePane"><p class="hint">Select a message.</p></div>
+            <div id="messagePane"><p class="hint" style="padding:10px">Select a message.</p></div>
         </div>
     </div>
+
+    <button id="mbxExitFullscreenBtn" onclick="mbxExitFullscreen()">Exit Fullscreen</button>
 
     <script>
         var apiBase = "";
@@ -253,7 +294,10 @@
                     // tag itself doesn't reliably control an embedded document's
                     // scrollability) — so a long record scrolls within itself
                     // instead of pushing #replyBox down/out of view.
-                    card.innerHTML = "<strong>" + escapeHtml(item.ItemLabel || "Form Application Record") + "</strong>" +
+                    card.innerHTML = "<div class='mbx-item-header' style='display:flex;justify-content:space-between;align-items:center'>" +
+                        "<strong>" + escapeHtml(item.ItemLabel || "Form Application Record") + "</strong>" +
+                        "<button class='secondary' onclick='mbxEnterFullscreen(this)'>View Fullscreen</button>" +
+                        "</div>" +
                         "<iframe src='ia-viewer.html?messageItemId=" + item.MessageItemID + "' " +
                         "style='width:100%;height:450px;border:1px solid #ccc;margin-top:8px;display:block' " +
                         "title='" + escapeHtml(item.ItemLabel || "Form Application Record") + "'></iframe>";
@@ -321,6 +365,78 @@
         function escapeHtml(s) {
             return String(s == null ? "" : s)
                 .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+        }
+
+        // Companion to ia-viewer.html's mbxNotifyPopupState() (js/newOpts.js) — that
+        // iframe can't make its own popups escape its box, so instead it tells us
+        // when one opens/closes and we grow the <iframe> ELEMENT itself to fill the
+        // viewport. event.source (not an id) identifies which iframe sent it, since
+        // a message can be open with several IAFormRecord items/iframes on screen.
+        var mbxFullscreenFrame = null;
+        // True once fullscreen was entered via the "View Fullscreen" button rather
+        // than a popup — while true, an internal popup opening/closing (View PDF, a
+        // confirm dialog, the attachment viewer — ViewDisp()'s UI has several) must
+        // NOT auto-exit fullscreen on its own "closed" message; only the explicit
+        // Exit Fullscreen button should end a manually-entered fullscreen.
+        var mbxManualFullscreen = false;
+
+        // Single choke point for entering/exiting the fullscreen visual state, so
+        // the frame class, the Exit button, and hiding itemCard headers (see the
+        // .mbx-item-header CSS comment) can never drift out of sync across the four
+        // places fullscreen can be triggered/ended (a popup opening, a popup closing,
+        // the View Fullscreen button, the Exit Fullscreen button).
+        function mbxSetFullscreen(frame) {
+            if (mbxFullscreenFrame && mbxFullscreenFrame !== frame) {
+                mbxFullscreenFrame.classList.remove("mbx-iframe-fullscreen");
+            }
+            frame.classList.add("mbx-iframe-fullscreen");
+            mbxFullscreenFrame = frame;
+            document.body.classList.add("mbx-fullscreen-active");
+            document.getElementById("mbxExitFullscreenBtn").style.display = "block";
+        }
+
+        function mbxClearFullscreen() {
+            if (mbxFullscreenFrame) mbxFullscreenFrame.classList.remove("mbx-iframe-fullscreen");
+            mbxFullscreenFrame = null;
+            mbxManualFullscreen = false;
+            document.body.classList.remove("mbx-fullscreen-active");
+            document.getElementById("mbxExitFullscreenBtn").style.display = "none";
+        }
+
+        window.addEventListener("message", function (event) {
+            if (event.origin !== window.location.origin) return;
+            if (!event.data || (event.data.mbxPopup !== "open" && event.data.mbxPopup !== "closed")) return;
+
+            var frames = document.querySelectorAll("#messagePane iframe");
+            for (var i = 0; i < frames.length; i++) {
+                if (frames[i].contentWindow === event.source) {
+                    if (event.data.mbxPopup === "open") {
+                        mbxSetFullscreen(frames[i]);
+                    } else if (mbxFullscreenFrame === frames[i] && !mbxManualFullscreen) {
+                        mbxClearFullscreen();
+                    }
+                    break;
+                }
+            }
+        });
+
+        // Lets a user go fullscreen straight away to read/work a record comfortably,
+        // without first having to open some popup inside it just to trigger
+        // mbxNotifyPopupState. `btn` is the clicked button itself — its own itemCard
+        // sibling iframe is the one to fullscreen (a message can have more than one
+        // IAFormRecord item/iframe on screen at once).
+        function mbxEnterFullscreen(btn) {
+            var frame = btn.closest(".itemCard").querySelector("iframe");
+            if (!frame) return;
+            mbxSetFullscreen(frame);
+            mbxManualFullscreen = true;
+        }
+
+        // Manual escape hatch (see the button's CSS comment) — just undoes the visual
+        // fullscreen; it doesn't reach into the iframe to close the popup itself, so
+        // the ported code's own PopUp() state is left alone.
+        function mbxExitFullscreen() {
+            mbxClearFullscreen();
         }
 
         if (token) { showApp(); }

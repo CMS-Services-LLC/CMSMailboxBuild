@@ -33,6 +33,15 @@
      anchors it to the iframe's own viewport instead, wherever the user actually
      is. Scoped to this page only — not touching the shared site.css class. */
   .fileViewer { position: fixed !important; }
+  /* Same bug, same fix, for the generic PopUp() modal (js/newOpts.js) used by
+     "Apply Notes" and everything else that calls PopUp() — .PopUp is also
+     "position:absolute" relative to PageContainer's top edge in the shared
+     site.css, so on a long record it opens off-screen above wherever the user
+     had scrolled to, and the page jumps to show it. Fixed positioning anchors it
+     to the iframe's own viewport instead. PopUp()'s own top/left inline styles
+     are unaffected — they just become viewport-relative instead of
+     content-relative, still landing in the same reasonable near-top-left offset. */
+  .PopUp { position: fixed !important; }
 </style>
 </head>
 <body>

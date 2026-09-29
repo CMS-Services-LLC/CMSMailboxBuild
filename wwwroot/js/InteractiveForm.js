@@ -2417,10 +2417,6 @@ function ViewDispGO(js, jsVals, JoinedID, JoinedTitle, jsMgtData, jsMultiAnswers
             if (js.MainID != 0 && isReleased && isMGT) {
                 additionalActions.push("button|class=longblueButton|style=width:100%;display:block;float:none;margin-bottom:6px|onclick=LockRecord(" + js.MainID + ")|Save & Lock");
             }
-            //code:20241108:jk:clone record
-            if (js.MainID != 0 && jsVals[0].MainCID == myCID) {
-                additionalActions.push("button|class=longblueButton|style=width:100%;display:block;float:none;margin-bottom:6px|onclick=ViewDisp(" + js.MainID + ", null, true)|Clone");
-            }
         } else if (MGTEditOnOff && unlocked) {
             xsection(dispButtons, [
                 "button|name=btnSave|class=blueButton btnIASave|onclick=SubmitRecord(" + js.MainID + ", true)|Save",
@@ -2430,10 +2426,6 @@ function ViewDispGO(js, jsVals, JoinedID, JoinedTitle, jsMgtData, jsMultiAnswers
             xsection(dispButtons, [
                 "label|class=red padRight10|Record Locked",
             ]);
-
-            if (js.MainID != 0 && jsVals[0].MainCID == myCID) {
-                additionalActions.push("button|class=longblueButton|style=width:100%;display:block;float:none;margin-bottom:6px|onclick=ViewDisp(" + js.MainID + ", null, true)|Clone");
-            }
         }
 
         if (js.MainID != 0) {
