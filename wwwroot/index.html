@@ -35,6 +35,8 @@
         .msgRow { padding: 10px 14px; border-bottom: 1px solid #eee; cursor: pointer; }
         .msgRow:hover { background: #f0f4fa; }
         .msgRow.unread { font-weight: bold; }
+        /* The message open on the right. Inset so the bordered row keeps its size. */
+        .msgRow.selected { background: #eef4ff; box-shadow: inset 0 0 0 2px #2c6bd6; border-radius: 3px; }
         .msgRow .subj { display: block; }
         .msgRow .meta { font-size: 12px; color: #777; font-weight: normal; }
         /* #messagePane is a column: #messageScroll sizes to its own content
@@ -308,6 +310,8 @@
                         // Unread emphasis only means something in the Inbox.
                         div.className = "msgRow" + (folder === "inbox" && !m.DTViewed ? " unread" : "");
                         div.onclick = function () { openMessage(m.MessageID); };
+                        div.setAttribute("data-message-id", m.MessageID);
+                        if (m.MessageID === currentMessageId) div.classList.add("selected");
                         var who = folder === "sent"
                             ? "To " + escapeHtml(m.ToNames || "")
                             : escapeHtml(m.FromName) + " (" + escapeHtml(m.FromCompany) + ")";
@@ -322,6 +326,7 @@
 
         function openMessage(messageId) {
             currentMessageId = messageId;
+            markSelectedRow();
             api("/inbox/" + messageId)
                 .then(function (r) {
                     if (!r.ok) throw new Error("not found");
@@ -337,6 +342,13 @@
                 .catch(function () {
                     document.getElementById("messagePane").innerHTML = "<p class='err'>Could not open this message.</p>";
                 });
+        }
+
+        // Outlines the open message's row in the list (see .msgRow.selected).
+        function markSelectedRow() {
+            document.querySelectorAll("#inboxList .msgRow").forEach(function (row) {
+                row.classList.toggle("selected", parseInt(row.getAttribute("data-message-id"), 10) === currentMessageId);
+            });
         }
 
         function renderMessage(msg, items) {
@@ -395,7 +407,7 @@
                     // A task item that hasn't been started (ItemID "0") opens
                     // ia-viewer.html in new-record mode — same page, same URL; the
                     // server decides the mode from the item itself.
-                    card.innerHTML = taskBanner(item) +
+                    card.innerHTML = taskBanner(item) + originBannerHtml(item) + reviewBarHtml(item) +
                         "<div class='mbx-item-header' style='display:flex;justify-content:space-between;align-items:center'>" +
                         "<strong>" + escapeHtml(item.ItemLabel || "Form Application Record") + "</strong>" +
                         "<button class='secondary' onclick='mbxEnterFullscreen(this)'>View Fullscreen</button>" +
@@ -411,7 +423,7 @@
                     itemsArea.appendChild(card);
                 } else if (item.ItemType === "DynamicReport") {
                     // A completed report carried onto a reply (sql/010) — no task.
-                    card.innerHTML = "<strong>" + escapeHtml(item.ItemLabel || "Dynamic Report") + "</strong>" + drViewerHtml(item.MessageItemID);
+                    card.innerHTML = originBannerHtml(item) + reviewBarHtml(item) + "<strong>" + escapeHtml(item.ItemLabel || "Dynamic Report") + "</strong>" + drViewerHtml(item.MessageItemID);
                     itemsArea.appendChild(card);
                 } else {
                     var btn = document.createElement("button");
@@ -428,7 +440,7 @@
         // were sent with "Require my review" (sql/009), a finished task gets a
         // Mark as Completed button.
         function senderCardHtml(item) {
-            var html = taskBanner(item) + "<strong>" + escapeHtml(item.ItemLabel || item.ItemType) + "</strong>";
+            var html = taskBanner(item) + originBannerHtml(item) + "<strong>" + escapeHtml(item.ItemLabel || item.ItemType) + "</strong>";
             if (item.IsAssigner && item.TaskStatus === "Pending Review") {
                 html += "<p class='hint'>The assignee has finished this task. Check it in CMSNEO, then mark it completed.</p>" +
                     "<button class='primary' id='reviewBtn_" + item.MessageItemID + "' onclick='reviewTask(" + item.MessageItemID + ")'>Mark as Completed</button>" +
@@ -440,7 +452,59 @@
             return html;
         }
 
+        // On a reply's copy of a task's record/report (sql/015): the original task's
+        // current status, for its assignee and assigner. Left out when the review bar
+        // below is shown instead (it already says Pending Review, with the button).
+        function originBannerHtml(item) {
+            if (!item.OriginTaskStatus || item.ReviewTaskItemID) return "";
+            var st = item.OriginTaskStatus;
+            var done = st === "Completed", pending = st === "Pending Review";
+            var label = { Saved: "Saved - waiting for Save for Use" }[st] || st;
+            var what = { FormApplication: "Form Application task", DynamicReport: "Dynamic Report task" }[item.OriginTaskType] || "Task";
+            var due = (item.OriginDueDate && !done) ? " &middot; Due " + escapeHtml(String(item.OriginDueDate).substring(0, 10)) : "";
+            return "<div class='taskBanner' style='padding:6px 10px;margin-bottom:8px;border-radius:3px;" +
+                (done ? "background:#e6f4ea;color:#1e6b34" : pending ? "background:#e8f0fe;color:#1a4a9c" : "background:#fff4e0;color:#8a5300") + "'>" +
+                "<b>" + what + ":</b> <b>" + escapeHtml(label) + "</b>" + due + "</div>";
+        }
+
+        // On a reply's copy of a finished record/report (sql/014): if the task it came
+        // from is waiting for THIS user's review, offer Mark as Completed right here.
+        // ReviewTaskItemID is that task's own item (on the original message); the
+        // server (MBX_ReviewTask) re-checks that the caller is its assigner.
+        function reviewBarHtml(item) {
+            if (!item.ReviewTaskItemID) return "";
+            var id = item.MessageItemID;
+            return "<div class='taskBanner' id='reviewBar_" + id + "' style='padding:6px 10px;margin-bottom:8px;border-radius:3px;background:#e8f0fe;color:#1a4a9c'>" +
+                "<b>Task:</b> finished, <b>Pending Review</b> &middot; check it, then " +
+                "<button class='primary' id='reviewReplyBtn_" + id + "' onclick='reviewFromReply(" + item.ReviewTaskItemID + "," + id + ")'>Mark as Completed</button> " +
+                "<span class='err' id='reviewReplyMsg_" + id + "'></span></div>";
+        }
+
+        function reviewFromReply(taskItemId, itemId) {
+            if (!confirm(MARK_COMPLETED_CONFIRM)) return;
+            var btn = document.getElementById("reviewReplyBtn_" + itemId);
+            btn.disabled = true;
+            api("/item/" + taskItemId + "/task/review", { method: "POST" })
+                .then(function (r) {
+                    if (r.status === 401) { logout(); throw new Error("unauthorized"); }
+                    if (!r.ok) throw new Error("refused");
+                    var bar = document.getElementById("reviewBar_" + itemId);
+                    bar.style.background = "#e6f4ea";
+                    bar.style.color = "#1e6b34";
+                    bar.innerHTML = "<b>Task:</b> <b>Completed</b> &middot; you marked it completed.";
+                })
+                .catch(function () {
+                    btn.disabled = false;
+                    document.getElementById("reviewReplyMsg_" + itemId).innerText = "This task couldn't be marked completed. Refresh the message and try again.";
+                });
+        }
+
+        // Asked before either Mark as Completed button (Sent folder or a reply) acts —
+        // completing a task can't be undone from the mailbox.
+        var MARK_COMPLETED_CONFIRM = "Are you sure you want to mark this as completed?";
+
         function reviewTask(messageItemId) {
+            if (!confirm(MARK_COMPLETED_CONFIRM)) return;
             var btn = document.getElementById("reviewBtn_" + messageItemId);
             var msg = document.getElementById("reviewMsg_" + messageItemId);
             btn.disabled = true;
