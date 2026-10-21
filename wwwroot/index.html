@@ -5,7 +5,7 @@
     <!-- Never send this page's address to another site: a one-time handoff code
          (?handoff=, see the startup code at the bottom) can briefly be in it. -->
     <meta name="referrer" content="no-referrer" />
-    <title>CMS Mailbox</title>
+    <title>CMS Secure Mailbox</title>
     <style>
         /* #appScreen is a fixed 100vh shell with its own internal scroll areas
            (#inboxList, #messagePane) — without this, the outer body ALSO scrolls
@@ -23,6 +23,11 @@
         #loginScreen { display: none; }
         #startScreen { text-align: center; margin: 120px auto; font-size: 16px; color: #444; }
         #topBar { background: #1a2c42; color: #fff; padding: 10px 16px; display: flex; justify-content: space-between; align-items: center; }
+        #topBarRight { display: flex; align-items: center; gap: 14px; font-size: 13px; }
+        #idleDisplay { color: #c9d6ea; }
+        /* Idle-timeout warning (see the session section of the script). */
+        #idleWarning { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 10000; align-items: center; justify-content: center; }
+        #idleWarning > div { background: #fff; border-radius: 6px; padding: 22px 26px; text-align: center; box-shadow: 0 4px 20px rgba(0,0,0,0.3); min-width: 300px; }
         #layout { display: flex; height: calc(100vh - 44px); }
         /* #listPane = folder tabs on top + the scrolling message list below. The width/
            background/border that used to live on #inboxList moved up to the wrapper. */
@@ -123,8 +128,16 @@
         Mailbox loading. Please wait ...
     </div>
 
+    <div id="idleWarning">
+        <div>
+            <div style="font-weight:bold;font-size:16px;margin-bottom:8px">Session Timeout</div>
+            <div id="idleWarningText"></div><br />
+            <button class="primary" onclick="stayLoggedIn()">Stay logged in</button>
+        </div>
+    </div>
+
     <div id="loginScreen">
-        <h2>CMS Mailbox</h2>
+        <h2>CMS Secure Mailbox</h2>
         <div id="loginStep">
             <input id="username" placeholder="Username" autocomplete="username" onkeyup="if (event.key === 'Enter') doLogin()" />
             <input id="password" type="password" placeholder="Password" autocomplete="current-password" onkeyup="if (event.key === 'Enter') doLogin()" />
@@ -142,8 +155,12 @@
 
     <div id="appScreen">
         <div id="topBar">
-            <strong>CMS Mailbox</strong>
-            <button class="secondary" onclick="logout()">Log Out</button>
+            <strong>CMS Secure Mailbox</strong>
+            <div id="topBarRight">
+                <span id="loggedInAs"></span>
+                <span id="idleDisplay"></span>
+                <button class="secondary" onclick="logout()">Log Out</button>
+            </div>
         </div>
         <div id="layout">
             <div id="listPane">
@@ -239,7 +256,9 @@
         }
 
         function logout() {
+            stopSession();
             sessionStorage.removeItem("mbxToken");
+            sessionStorage.removeItem("UserToken");
             token = "";
             document.getElementById("appScreen").style.display = "none";
             document.getElementById("startScreen").style.display = "none";
@@ -264,6 +283,102 @@
             loadInbox();
         }
 
+        // ---- Session: idle timeout + heartbeat (same idea as CMSNEO's layout.js /
+        // global.js heartbeat, with fixed times) ---------------------------------
+        // Any click — on this page or inside a record viewer (it posts mbxActivity) —
+        // resets the countdown to IDLE_MINUTES. When it runs out, a warning counts down
+        // WARN_SECONDS; "Stay logged in" resets it, reaching 0 logs out. Separately,
+        // the heartbeat swaps in a fresh login token every minute (auth/heartbeat) so
+        // an open session's 60-minute token never expires under it.
+        var IDLE_MINUTES = 30;
+        var WARN_SECONDS = 30;
+        var HEARTBEAT_MS = 60000;
+
+        var idleDeadline = 0, idleTick = null, heartbeatTimer = null, heartbeatFails = 0;
+        var warningLeft = 0;
+
+        function startSession() {
+            stopSession();
+            resetIdle();
+            idleTick = setInterval(idleCheck, 1000);
+            heartbeatTimer = setInterval(heartbeat, HEARTBEAT_MS);
+            api("/auth/me")
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (me) {
+                    if (!me || !me.name) return;
+                    document.getElementById("loggedInAs").innerText =
+                        "Logged in as: " + me.name + (me.company ? " (" + me.company + ")" : "");
+                })
+                .catch(function () { });
+        }
+
+        function stopSession() {
+            if (idleTick) clearInterval(idleTick);
+            if (heartbeatTimer) clearInterval(heartbeatTimer);
+            idleTick = heartbeatTimer = null;
+            document.getElementById("idleWarning").style.display = "none";
+            document.getElementById("idleDisplay").innerText = "";
+            document.getElementById("loggedInAs").innerText = "";
+        }
+
+        function resetIdle() {
+            // Clicks while the warning is up don't count — only "Stay logged in" does.
+            if (document.getElementById("idleWarning").style.display === "flex") return;
+            idleDeadline = Date.now() + IDLE_MINUTES * 60000;
+            idleCheck();
+        }
+
+        function stayLoggedIn() {
+            document.getElementById("idleWarning").style.display = "none";
+            resetIdle();
+        }
+
+        function idleCheck() {
+            if (!token) return;
+            var left = idleDeadline - Date.now();
+            if (left > 0) {
+                var mins = Math.ceil(left / 60000);
+                document.getElementById("idleDisplay").innerText = mins + " minute" + (mins === 1 ? "" : "s") + " until timeout";
+                return;
+            }
+            // Deadline passed: show the warning and count WARN_SECONDS down from when it
+            // passed (so a computer that slept through it doesn't get the full 30s).
+            var overdue = Math.floor(-left / 1000);
+            warningLeft = WARN_SECONDS - overdue;
+            if (warningLeft <= 0) {
+                logout();
+                return;
+            }
+            document.getElementById("idleDisplay").innerText = "";
+            document.getElementById("idleWarningText").innerText = "You will be logged out in " + warningLeft + " seconds.";
+            document.getElementById("idleWarning").style.display = "flex";
+        }
+
+        function heartbeat() {
+            if (!token) return;
+            api("/auth/heartbeat", { method: "POST" })
+                .then(function (r) {
+                    if (r.status === 401) throw new Error("unauthorized");
+                    if (!r.ok) throw new Error("failed");
+                    return r.json();
+                })
+                .then(function (res) {
+                    heartbeatFails = 0;
+                    token = res.token;
+                    sessionStorage.setItem("mbxToken", token);
+                    // The record viewer frames' ajax.js reads this key on every request
+                    // (sessionStorage is shared with same-origin frames in this tab).
+                    sessionStorage.setItem("UserToken", token);
+                })
+                .catch(function (ex) {
+                    // A blip isn't a dead session — log out only after 3 failures in a row.
+                    heartbeatFails++;
+                    if (heartbeatFails >= 3) logout();
+                });
+        }
+
+        document.addEventListener("click", function () { if (token) resetIdle(); }, true);
+
         function showLogin() {
             document.getElementById("startScreen").style.display = "none";
             document.getElementById("loginScreen").style.display = "block";
@@ -273,6 +388,7 @@
             document.getElementById("startScreen").style.display = "none";
             document.getElementById("loginScreen").style.display = "none";
             document.getElementById("appScreen").style.display = "block";
+            startSession();
             setFolder("inbox");
 
             // Deep link from the share-notification email (?message=<id>) — open it
@@ -1045,6 +1161,7 @@
 
         window.addEventListener("message", function (event) {
             if (event.origin !== window.location.origin) return;
+            if (event.data && event.data.mbxActivity) { resetIdle(); return; }
             // ia-viewer.html's mbxRecordSaved(): a record was just saved. Reload only
             // that iframe (a new-record task's item now points at the saved record)
             // and refresh the task lines — not the whole message, whose other forms

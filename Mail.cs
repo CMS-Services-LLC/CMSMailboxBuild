@@ -28,10 +28,10 @@ namespace CMSMailbox
             var message = new MimeMessage();
             message.From.Add(new MailboxAddress(creds[0], creds[1]));
             message.To.Add(new MailboxAddress("", email));
-            message.Subject = "CMS Mailbox IP Validation";
+            message.Subject = "CMS Secure Mailbox IP Validation";
             message.Body = new TextPart("html")
             {
-                Text = "<p>You have attempted to log in to the CMS Mailbox from an unknown location.</p>" +
+                Text = "<p>You have attempted to log in to the CMS Secure Mailbox from an unknown location.</p>" +
                 "<p>Please click the link below to validate this location and enter the site.</p>" +
                 @"<p><a href=""" + DB.Url + @"/Validate?auth=" + auth + @""">Validate my IP Address</a></p>" +
                 "<p style=\"color:red\">*** If you believe a login was attempted by someone other than yourself, please click the link below.</p>" +

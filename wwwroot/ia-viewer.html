@@ -105,6 +105,14 @@
     // report-grid refresh). Inside the mailbox, index.html reloads this iframe and
     // refreshes the message's task status (a first save links a new-record task's
     // record; Save for Use can finish a task); opened on its own, just reload.
+    // Clicks inside this frame don't reach index.html, so report them: they reset the
+    // mailbox's idle-timeout countdown the same as a click on the page itself.
+    document.addEventListener("click", function () {
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({ mbxActivity: true }, window.location.origin);
+      }
+    }, true);
+
     function mbxRecordSaved() {
       if (window.parent && window.parent !== window) {
         window.parent.postMessage({ mbxRecordSaved: true }, window.location.origin);

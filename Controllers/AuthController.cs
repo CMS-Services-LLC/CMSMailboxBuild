@@ -124,6 +124,48 @@ namespace CMSMailbox.Controllers
             return Ok(new { status = "ok", token, messageId });
         }
 
+        // Sliding expiration, like CMSNEO's heartbeat: the page calls this every minute
+        // while it's open and swaps in the fresh 60-minute token, so an open session's
+        // token never runs out under it. Idle logout is the page's job (its inactivity
+        // countdown), not this endpoint's. Only a valid session token is accepted —
+        // ValidateAndGetUID refuses the pre-2FA pending token.
+        [HttpPost("heartbeat")]
+        public IActionResult Heartbeat()
+        {
+            string bearer = "";
+            if (Request.Headers.TryGetValue(Microsoft.Net.Http.Headers.HeaderNames.Authorization, out var auth))
+            {
+                var parts = auth.FirstOrDefault()?.Split(' ');
+                bearer = (parts != null && parts.Length > 1) ? parts[1] : "";
+            }
+
+            string uid = TokenGenerator.ValidateAndGetUID(bearer, out _);
+            if (uid == "0") return Unauthorized();
+
+            return Ok(new { token = new TokenGenerator().GenerateToken(uid) });
+        }
+
+        // Who's logged in, for the top bar's "Logged in as:".
+        [HttpGet("me")]
+        public IActionResult Me()
+        {
+            string bearer = "";
+            if (Request.Headers.TryGetValue(Microsoft.Net.Http.Headers.HeaderNames.Authorization, out var auth))
+            {
+                var parts = auth.FirstOrDefault()?.Split(' ');
+                bearer = (parts != null && parts.Length > 1) ? parts[1] : "";
+            }
+
+            if (!int.TryParse(TokenGenerator.ValidateAndGetUID(bearer, out _), out int uid) || uid == 0) return Unauthorized();
+
+            var dat = DB.GetDB(
+                "select u.Fname + ' ' + u.Lname as Name, c.Company " +
+                "from Users u left join Companies c on c.CID = dbo.mycid(u.UID) where u.UID = @uid", uid);
+            if (dat.Rows.Count == 0 || dat.Columns.Contains("err")) return Ok(new { name = "", company = "" });
+
+            return Ok(new { name = dat.Rows[0]["Name"]?.ToString() ?? "", company = dat.Rows[0]["Company"]?.ToString() ?? "" });
+        }
+
         // CMSNEO's origin (scheme://host:port of AppSettings:CmsUrl) — not a secret. The
         // page accepts a handoff code posted from another tab (CMSNEO reusing an
         // already-open mailbox tab) only from this origin, so no other site can push

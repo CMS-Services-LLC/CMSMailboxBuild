@@ -125,6 +125,13 @@ namespace CMSMailbox
             try
             {
                 var principal = handler.ValidateToken(token, validationParameters, out _);
+
+                // A purpose-scoped token (GeneratePendingMfaToken's "pending_mfa": issued
+                // after the password check but BEFORE 2FA) is never a session token. It
+                // is signed with the same key, so without this check it would pass
+                // everything above and skip 2FA on every authenticated endpoint.
+                if (principal.Claims.Any(c => c.Type == "purpose")) return "0";
+
                 var uid = principal.Claims.FirstOrDefault(c => c.Type == JwtRegisteredClaimNames.Sub)?.Value;
                 csrf = principal.Claims.FirstOrDefault(c => c.Type == JwtRegisteredClaimNames.Jti)?.Value ?? "";
                 return uid ?? "0";
