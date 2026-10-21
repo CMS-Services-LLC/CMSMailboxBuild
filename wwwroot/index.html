@@ -337,7 +337,9 @@
                 var card = document.createElement("div");
                 card.className = "itemCard";
                 if (!isRecipient) {
-                    card.innerHTML = "<strong>" + escapeHtml(item.ItemLabel || item.ItemType) + "</strong>" +
+                    // In Sent, a task item shows its status — this is how the
+                    // assigner sees whether it has been done yet.
+                    card.innerHTML = taskBanner(item) + "<strong>" + escapeHtml(item.ItemLabel || item.ItemType) + "</strong>" +
                         "<p class='hint'>Attached to this message. Open it from the message you received, or in CMSNEO.</p>";
                     itemsArea.appendChild(card);
                 } else if (item.ItemType === "IAFormRecord") {
@@ -351,7 +353,11 @@
                     // tag itself doesn't reliably control an embedded document's
                     // scrollability) — so a long record scrolls within itself
                     // instead of pushing #replyBox down/out of view.
-                    card.innerHTML = "<div class='mbx-item-header' style='display:flex;justify-content:space-between;align-items:center'>" +
+                    // A task item that hasn't been started (ItemID "0") opens
+                    // ia-viewer.html in new-record mode — same page, same URL; the
+                    // server decides the mode from the item itself.
+                    card.innerHTML = taskBanner(item) +
+                        "<div class='mbx-item-header' style='display:flex;justify-content:space-between;align-items:center'>" +
                         "<strong>" + escapeHtml(item.ItemLabel || "Form Application Record") + "</strong>" +
                         "<button class='secondary' onclick='mbxEnterFullscreen(this)'>View Fullscreen</button>" +
                         "</div>" +
@@ -367,6 +373,22 @@
                     itemsArea.appendChild(card);
                 }
             });
+        }
+
+        // Task line shown above an item that carries a task (MBX_Task, sql/006). For a
+        // form task MBX_GetMessage derives TaskStatus (sql/007): Open (not started),
+        // Saved (record saved but not released yet), Completed (released).
+        function taskBanner(item) {
+            if (!item.TaskID) return "";
+            var done = item.TaskStatus === "Completed";
+            var what = { FormApplication: "Fill out this form and click Save for Use" }[item.TaskType] || "Task";
+            var statusText = { Completed: "Completed", Saved: "Saved - waiting for Save for Use", Cancelled: "Cancelled" }[item.TaskStatus] || "Open";
+            // DueDate is a SQL date (serialized as midnight) — show the date part as-is
+            // rather than letting a timezone conversion shift it a day.
+            var due = item.DueDate ? " &middot; Due " + escapeHtml(String(item.DueDate).substring(0, 10)) : "";
+            return "<div class='taskBanner' style='padding:6px 10px;margin-bottom:8px;border-radius:3px;" +
+                (done ? "background:#e6f4ea;color:#1e6b34" : "background:#fff4e0;color:#8a5300") + "'>" +
+                "<b>Task:</b> " + what + due + " &middot; <b>" + statusText + "</b></div>";
         }
 
         function downloadItem(messageItemId, label) {
@@ -476,6 +498,14 @@
 
         window.addEventListener("message", function (event) {
             if (event.origin !== window.location.origin) return;
+            // ia-viewer.html's mbxNewRecordSaved(): a new-record task was just saved.
+            // Re-open the message so the item shows the saved record and the task's
+            // new status.
+            if (event.data && event.data.mbxTaskSaved) {
+                mbxClearFullscreen();
+                if (currentMessageId) openMessage(currentMessageId);
+                return;
+            }
             if (!event.data || (event.data.mbxPopup !== "open" && event.data.mbxPopup !== "closed")) return;
 
             var frames = document.querySelectorAll("#messagePane iframe");

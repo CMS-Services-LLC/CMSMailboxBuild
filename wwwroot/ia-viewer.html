@@ -101,6 +101,17 @@
   <script src="js/InteractiveForm.js" asp-append-version="true"></script>
 
   <script>
+    // Called by the patched SubmitRecord() after the first save of a new-record task.
+    // Inside the mailbox, index.html re-opens the message (the item now points at
+    // the saved record and the task shows its new status); opened on its own, just reload.
+    function mbxNewRecordSaved() {
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({ mbxTaskSaved: true }, window.location.origin);
+      } else {
+        window.location.reload();
+      }
+    }
+
     (function () {
       // Bridge this app's own login token into the name the ported ajax.js expects
       // (sessionStorage is shared with the parent tab/page on this same origin, so
@@ -129,6 +140,17 @@
       fetch("item/" + messageItemId + "/bootstrap", {
         headers: { "Authorization": "Bearer " + realToken }
       }).then(function (r) {
+        if (r.status === 403) {
+          // IaViewerController.Bootstrap: the record exists but hasn't been
+          // released yet, so only the company that created it can open it.
+          return r.json().then(function (res) {
+            if (res && res.reason === "unreleased") {
+              document.getElementById("mbxDeniedBanner").textContent =
+                "This record has not yet been saved for use.";
+            }
+            throw new Error("bootstrap refused: " + (res && res.reason));
+          });
+        }
         if (!r.ok) throw new Error("bootstrap failed");
         return r.json();
       }).then(function (ctx) {
@@ -140,6 +162,10 @@
         myUID = ctx.myUID;
         currentFormID = ctx.formId;
         ME = { Security: jparse(ctx.security) };
+        // A FormApplication task that hasn't been started: ctx.mainId is 0 and
+        // ViewDisp(0, formId) renders a blank new record. Read by the patched
+        // SubmitRecord() in js/InteractiveForm.js.
+        window.MBX_NewRecordMode = !!ctx.newRecord;
 
         // Build dispMain/dispReportOuter as CHILDREN of PageContainer — see the HTML
         // comment above; this is the DOM-structure part of iaStartMe() this viewer

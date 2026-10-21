@@ -68,17 +68,58 @@ namespace CMSMailbox.Controllers
             "_IAAcceptAddtlInfo", "_IAGetSetSystemLinks", "_IADocAssign", "_IALoadNotes"
         };
 
+        // New-record mode (a FormApplication task, sql/006): the item's ItemID is still
+        // "0", so there is no record for Gate B to check yet. Only the calls the blank
+        // ViewDisp(0, FormID) render and the first save actually need are allowed, and
+        // AdHoc additionally pins mainid/formid/recordid/released (see
+        // NewRecordParamsAllowed). After the first save the item points at the new
+        // MainID and every later call takes the normal two-gate path above.
+        private static readonly HashSet<string> NewRecordActions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "_IAGetFormData", "_IAGetJoinRecord", "_IAGetFieldMGTData", "_IAGetMultiAnswers",
+            "_IAGetDataBlanks", "_IAGetSetAprovalBy", "_IAGetCIDs", "_GetCleanFilename", "_GetGUIDs",
+            "_IASubmitDataByGen300_2"
+        };
+
         [HttpGet("item/{messageItemId:int}/bootstrap")]
         public IActionResult Bootstrap(int messageItemId)
         {
             int uid = CurrentUID();
             if (uid == 0) return Unauthorized();
 
+            // A record that hasn't been released ("Save for Use", DTReleased is null) is
+            // only viewable by the company that created it — CMS's own report proc hides
+            // it from everyone else, even upstream management companies whose ACS the
+            // gates below would accept. Checked first so those viewers get a clear
+            // message instead of a viewer that fails to render.
+            if (IsUnreleasedForOtherCompany(messageItemId, uid))
+                return StatusCode(403, new { reason = "unreleased" });
+
             var ctx = ResolveAndGateByMessageItem(messageItemId, uid);
             if (ctx == null) return NotFound();
 
             var creds = DB.GetDB("exec NEO_GetMGTCID @uid", uid);
             var security = DB.GetDB("exec NEO_NewSecurity @uid", uid);
+
+            // No report row exists for a record that hasn't been created yet — and
+            // NEO_IAGETALLDATA260903 with MainID 0 means "no single-record filter",
+            // so it must not be called here.
+            if (ctx.IsNewRecord)
+            {
+                return Ok(new
+                {
+                    ok = true,
+                    newRecord = true,
+                    mainId = 0,
+                    formId = ctx.FormId,
+                    reportRaw = "[]",
+                    myCID = creds.Rows.Count > 0 ? creds.Rows[0]["MyCID"] : null,
+                    mgtCID = creds.Rows.Count > 0 ? creds.Rows[0]["MgtCID"] : null,
+                    isMGT = creds.Rows.Count > 0 && creds.Rows[0]["isMGT"] != DBNull.Value && Convert.ToInt32(creds.Rows[0]["isMGT"]) == 1,
+                    myUID = uid,
+                    security = JsonConvert.SerializeObject(security)
+                });
+            }
 
             // ViewDispGO reads several fields (Application_Type, hasDoc, strMainID, its
             // own echoed FormID, ...) off the "js" object InteractiveForm.js's ViewDisp()
@@ -125,14 +166,30 @@ namespace CMSMailbox.Controllers
             var ctx = ResolveAndGateByMessageItem(messageItemId, uid);
             if (ctx == null) return Content("[]");
 
-            bool allowed = ReadActions.Contains(action ?? "") || WriteActions.Contains(action ?? "");
+            bool allowed = ctx.IsNewRecord
+                ? NewRecordActions.Contains(action ?? "")
+                : ReadActions.Contains(action ?? "") || WriteActions.Contains(action ?? "");
             if (!allowed)
             {
-                LogAccess(messageItemId, uid, "Denied", "action not on allowlist: " + action);
+                LogAccess(messageItemId, uid, "Denied", "action not on allowlist" + (ctx.IsNewRecord ? " (new-record mode): " : ": ") + action);
                 return Content("[]");
             }
 
             var jo = string.IsNullOrEmpty(strjson) ? new JObject() : JObject.Parse(strjson);
+
+            if (ctx.IsNewRecord)
+            {
+                string why = NewRecordParamsAllowed(action, jo, ctx);
+                if (why != null)
+                {
+                    LogAccess(messageItemId, uid, "Denied", "new-record mode: " + why);
+                    return Content("[]");
+                }
+                // Releasing isn't offered on an unsaved record in the UI (ViewDispGO
+                // hides "Save for Use" when MainID is 0) — don't let it through here.
+                if (jo["released"] != null) jo["released"] = 0;
+                strjson = jo.ToString(Formatting.None);
+            }
 
             // ViewDisp() only ever calls this with an empty Fieldname (read mode) —
             // NEO_IAGetSetAprovalBy has an unguarded write branch when Fieldname is
@@ -155,7 +212,55 @@ namespace CMSMailbox.Controllers
             var dat = DB.GetDB(sql, uid, strjson ?? "");
 
             LogAccess(messageItemId, uid, "Served", action);
+
+            // First save of a new-record task: the proc created the record and returned
+            // its MainID. Link it to this item (the task stays open until the record is
+            // released — see sql/007), so the item now opens through the normal
+            // two-gate path.
+            if (ctx.IsNewRecord && string.Equals(action, "_IASubmitDataByGen300_2", StringComparison.OrdinalIgnoreCase)
+                && dat.Rows.Count > 0 && dat.Columns.Contains("MainID")
+                && int.TryParse(dat.Rows[0]["MainID"]?.ToString(), out int newMainId) && newMainId > 0)
+            {
+                var linked = DB.GetDB("exec MBX_LinkFormTask @uid, @messageItemId, @mainId", uid,
+                    "{\"messageItemId\":" + messageItemId + ",\"mainId\":" + newMainId + "}");
+                LogAccess(messageItemId, uid, linked.Columns.Contains("err") ? "Error" : "Served",
+                    linked.Columns.Contains("err") ? "task link failed: " + linked.Rows[0]["err"] : "task linked to MainID " + newMainId);
+            }
+
             return Content(JsonConvert.SerializeObject(dat), "application/json");
+        }
+
+        // Returns null if this new-record-mode call is allowed, else the reason. The
+        // record context is pinned server-side: no call may name an existing record
+        // (any mainid must be 0), any formid must be the task's own form, and a save
+        // must use a fresh recordid — one that doesn't already belong to a record,
+        // which is what makes NEO_IASubmitDataByGen300_2 create a new one rather than
+        // write into an existing record.
+        private static string NewRecordParamsAllowed(string action, JObject jo, ItemContext ctx)
+        {
+            foreach (var p in jo.Properties())
+            {
+                string val = p.Value?.ToString() ?? "";
+                if (string.Equals(p.Name, "mainid", StringComparison.OrdinalIgnoreCase) && val != "0" && val != "")
+                    return "mainid must be 0";
+                if (string.Equals(p.Name, "formid", StringComparison.OrdinalIgnoreCase) && val != "" &&
+                    !string.Equals(val, ctx.FormId, StringComparison.OrdinalIgnoreCase))
+                    return "formid is not the task's form";
+            }
+
+            if (string.Equals(action, "_IASubmitDataByGen300_2", StringComparison.OrdinalIgnoreCase))
+            {
+                string formId = jo["formid"]?.ToString() ?? "";
+                string recordId = jo["recordid"]?.ToString() ?? "";
+                if (!string.Equals(formId, ctx.FormId, StringComparison.OrdinalIgnoreCase)) return "save must name the task's form";
+                if (!Guid.TryParse(recordId, out _)) return "save needs a new recordid";
+
+                var existing = DB.GetDB("select top 1 1 as x from NEO_IAFormRecords where RecordID = @recordId", 0,
+                    "{\"recordId\":\"" + recordId + "\"}");
+                if (existing.Rows.Count > 0) return "recordid already belongs to a record";
+            }
+
+            return null;
         }
 
         // Mirrors CMS's own main/adHocAttach (HomeController.cs ~line 2496) for
@@ -177,6 +282,9 @@ namespace CMSMailbox.Controllers
 
             var ctx = ResolveAndGateByMessageItem(messageItemId, uid);
             if (ctx == null) return Content("[]");
+
+            // Attachments need a saved record (the UI says so too for MainID 0).
+            if (ctx.IsNewRecord) return Content("[]");
 
             if (!string.Equals(action, "_IALoadFiles", StringComparison.OrdinalIgnoreCase))
             {
@@ -298,6 +406,7 @@ namespace CMSMailbox.Controllers
 
             var ctx = ResolveAndGateByMessageItem(messageItemId, uid);
             if (ctx == null) return ProxyNotFound("DownloadIA", "access gates failed for this messageItemId");
+            if (ctx.IsNewRecord) return ProxyNotFound("DownloadIA", "new-record task item has no attachments yet");
 
             if (string.IsNullOrEmpty(DB.CmsUrl)) return ProxyNotFound("DownloadIA", "AppSettings:CmsUrl is not set");
 
@@ -367,7 +476,7 @@ namespace CMSMailbox.Controllers
             return Content(JsonConvert.SerializeObject(dat), "application/json");
         }
 
-        private class ItemContext { public int MainId; public string FormId; }
+        private class ItemContext { public int MainId; public string FormId; public bool IsNewRecord; }
 
         private ItemContext ResolveAndGateByMessageItem(int messageItemId, int uid)
         {
@@ -385,6 +494,12 @@ namespace CMSMailbox.Controllers
             }
 
             string formId = lookup.Rows[0]["FormID"]?.ToString();
+
+            if (lookup.Rows[0]["ItemID"].ToString() == "0")
+            {
+                return ResolveNewRecordTask(messageItemId, uid, formId);
+            }
+
             if (string.IsNullOrEmpty(formId) || !int.TryParse(lookup.Rows[0]["ItemID"].ToString(), out int mainId) || mainId <= 0)
             {
                 LogAccess(messageItemId, uid, "Error", "missing/invalid FormID or MainID on IAFormRecord item");
@@ -398,6 +513,36 @@ namespace CMSMailbox.Controllers
             }
 
             return new ItemContext { MainId = mainId, FormId = formId };
+        }
+
+        // ItemID "0" = a FormApplication task not started yet. Allowed only while an
+        // Open task on this item is assigned to this caller (MBX_GetOpenFormTask also
+        // re-checks they're a recipient), and only with Gate A — the caller's own
+        // Team grant for the form. There's no record yet, so no Gate B.
+        private ItemContext ResolveNewRecordTask(int messageItemId, int uid, string itemFormId)
+        {
+            var task = DB.GetDB("exec MBX_GetOpenFormTask @uid, @messageItemId", uid,
+                "{\"messageItemId\":" + messageItemId + "}");
+            if (task.Rows.Count == 0 || task.Columns.Contains("err"))
+            {
+                LogAccess(messageItemId, uid, "Denied", "new-record item without an open task for this user");
+                return null;
+            }
+
+            string formId = task.Rows[0]["FormID"]?.ToString();
+            if (string.IsNullOrEmpty(formId) || !string.Equals(formId, itemFormId, StringComparison.OrdinalIgnoreCase))
+            {
+                LogAccess(messageItemId, uid, "Error", "task FormID missing or doesn't match the item");
+                return null;
+            }
+
+            if (!PassesGateA(uid, formId))
+            {
+                LogAccess(messageItemId, uid, "Denied", "new-record task failed Gate A");
+                return null;
+            }
+
+            return new ItemContext { MainId = 0, FormId = formId, IsNewRecord = true };
         }
 
         // Used only by GetIAPDF, which receives a MainID but no MessageItemID (the
@@ -418,17 +563,43 @@ namespace CMSMailbox.Controllers
 
         private bool PassesGates(int uid, int mainId, string formId)
         {
-            if (string.IsNullOrEmpty(formId)) return false;
-
-            var security = DB.GetDB("exec NEO_NewSecurity @uid", uid);
-            bool formPermitted = security.Columns.Contains("FormID") &&
-                security.Rows.Cast<DataRow>().Any(r => r["FormID"] != DBNull.Value && r["FormID"].ToString() == formId);
-            if (!formPermitted) return false;
+            if (!PassesGateA(uid, formId)) return false;
 
             var formData = DB.GetDB("exec NEO_IAGetFormData @uid, @MainID, @FormID", uid,
                 "{\"MainID\":" + mainId + ",\"FormID\":\"" + formId + "\"}");
 
             return formData.Rows.Count > 0 && !formData.Columns.Contains("err");
+        }
+
+        // True when this user is a recipient of this IAFormRecord item, the record is
+        // active with DTReleased null, and the user's current company isn't the
+        // record's own company (which can always see its unreleased records — that's
+        // how the assignee gets back in to click Save for Use). Only refuses; it
+        // never grants anything.
+        private static bool IsUnreleasedForOtherCompany(int messageItemId, int uid)
+        {
+            var dat = DB.GetDB(
+                "select top 1 1 as x " +
+                "from MBX_MessageItem mi " +
+                "join MBX_Recipient r on r.MessageID = mi.MessageID and r.ToUID = @uid " +
+                "join NEO_IAFormRecords xfr on xfr.ID = try_cast(mi.ItemID as int) " +
+                "join NEO_IAFormRecords fr on fr.RecordID = xfr.RecordID and fr.active = 1 " +
+                "where mi.MessageItemID = @messageItemId and mi.ItemType = 'IAFormRecord' and mi.ItemID <> '0' " +
+                "and fr.DTReleased is null and fr.CID <> dbo.mycid(@uid)",
+                uid, "{\"messageItemId\":" + messageItemId + "}");
+
+            return dat.Rows.Count > 0 && !dat.Columns.Contains("err");
+        }
+
+        // Gate A: this user's own Team grant covers this FormID (NEO_NewSecurity
+        // returns one row per granted FormID).
+        private static bool PassesGateA(int uid, string formId)
+        {
+            if (string.IsNullOrEmpty(formId)) return false;
+
+            var security = DB.GetDB("exec NEO_NewSecurity @uid", uid);
+            return security.Columns.Contains("FormID") &&
+                security.Rows.Cast<DataRow>().Any(r => r["FormID"] != DBNull.Value && r["FormID"].ToString() == formId);
         }
 
         // Looks up the UID for a one-off token minted via NEO_GetUserToken — same

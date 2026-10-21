@@ -4176,6 +4176,16 @@ function SubmitRecord(mainid, released) {
                             PopUp("Clone Record Attachments and Notes", [mainid, cloneID], null, null, ["150px", "500px"]);
                         }
 
+                        // CMSMailbox adaptation: first save of a new-record task
+                        // (ia-viewer.html sets MBX_NewRecordMode). The server has
+                        // just linked the new MainID to this message item, so hand
+                        // off to ia-viewer.html to re-open it as a normal record
+                        // rather than running CMS's report-grid refresh.
+                        if (typeof MBX_NewRecordMode !== "undefined" && MBX_NewRecordMode) {
+                            mbxNewRecordSaved();
+                            return;
+                        }
+
                         //alert(mainid);
                         if (currentSaveFormVals.FormID == currentFormID)
                             GetMain(mainid);
