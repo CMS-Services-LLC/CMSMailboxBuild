@@ -47,7 +47,24 @@ namespace CMSMailbox.Controllers
             "_IAGetFormData", "_IAGetJoinRecord", "_IAGetFieldMGTData", "_IAGetMultiAnswers",
             "_IAGetDataBlanks", "_IAGetSetAprovalBy", "_IAGetFilesNotes", "_IAGetAddtlInfo",
             "_IAGetCIDs", "_IAGetAddtlInfoEmails", "_GetCleanFilename", "_GetUserToken",
-            "_IAGetDataByMainID", "_GetGUIDs"
+            "_IAGetDataByMainID", "_GetGUIDs",
+            // Record History. NEO_IAGetHistory2 only ACS-checks the header part, not the
+            // field history itself, so AdHoc pins its mainid to this item's own record
+            // (see PinnedToItemRecord).
+            "_IAGetHistory"
+        };
+
+        // Actions whose procs don't check the caller's access to the record they're
+        // given, so their mainid must be this message item's own record:
+        //   _IAGetHistory      — NEO_IAGetHistory2 only ACS-checks the header part
+        //   _IAGetJoinRecord, _IAGetMultiAnswers, _IAGetSetAprovalBy — no access check
+        //                        at all (plan doc Section 6.2)
+        // The ported viewer only ever calls these with the open record's own MainID
+        // (ViewDisp; InteractiveForm.js's "applied record" path that would pass another
+        // is dead code — triggeredID is hard-wired to null).
+        private static readonly HashSet<string> PinnedToItemRecord = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "_IAGetHistory", "_IAGetJoinRecord", "_IAGetMultiAnswers", "_IAGetSetAprovalBy"
         };
 
         // Write actions — unblocked 2026-09-22 once every one of these procs' own
@@ -189,6 +206,15 @@ namespace CMSMailbox.Controllers
                 // hides "Save for Use" when MainID is 0) — don't let it through here.
                 if (jo["released"] != null) jo["released"] = 0;
                 strjson = jo.ToString(Formatting.None);
+            }
+            else if (PinnedToItemRecord.Contains(action ?? ""))
+            {
+                var mainidProp = jo.Properties().FirstOrDefault(p => string.Equals(p.Name, "mainid", StringComparison.OrdinalIgnoreCase));
+                if (mainidProp == null || mainidProp.Value?.ToString() != ctx.MainId.ToString())
+                {
+                    LogAccess(messageItemId, uid, "Denied", action + ": mainid is not this item's record");
+                    return Content("[]");
+                }
             }
 
             // ViewDisp() only ever calls this with an empty Fieldname (read mode) —

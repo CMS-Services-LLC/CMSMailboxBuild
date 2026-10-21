@@ -5269,7 +5269,15 @@ function deleteRecord(mainid, go) {
 
 function RecordHistory(main, mainid) {
     getData(null, newFormData("_IAGetHistory", { mainid: mainid }), function (vr) {
+        // CMSMailbox adaptation: if the popup was rebuilt while this request was
+        // running (PopUp() with the same title calls renewPopUp(), which removes the
+        // old popup), this container is gone — the new popup's own request draws it.
+        if (!document.body.contains(main)) return;
         var js = jparse(vr);
+        if (js.length == 0) {
+            xsection(main, ["div|class=pad10 sm|There is no history for this record."]);
+            return;
+        }
         xsection(main, ["div|id=rhMain|style=height:calc(100%-10px)"]);
         //njchart(js, [], rhMain);
         xTable(main, {
