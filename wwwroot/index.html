@@ -2,6 +2,9 @@
 <html>
 <head>
     <meta charset="utf-8" />
+    <!-- Never send this page's address to another site: a one-time handoff code
+         (?handoff=, see the startup code at the bottom) can briefly be in it. -->
+    <meta name="referrer" content="no-referrer" />
     <title>CMS Mailbox</title>
     <style>
         /* #appScreen is a fixed 100vh shell with its own internal scroll areas
@@ -14,6 +17,11 @@
         #loginScreen input { width: 100%; padding: 8px; margin: 6px 0 14px; box-sizing: border-box; }
         #loginScreen button { width: 100%; padding: 10px; background: #2c6bd6; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
         #appScreen { display: none; height: 100vh; }
+        /* The page starts on #startScreen and only then shows the login form or the
+           app (see startup() at the bottom), so a handoff from CMSNEO never flashes
+           the login form while its code is being exchanged. */
+        #loginScreen { display: none; }
+        #startScreen { text-align: center; margin: 120px auto; font-size: 16px; color: #444; }
         #topBar { background: #1a2c42; color: #fff; padding: 10px 16px; display: flex; justify-content: space-between; align-items: center; }
         #layout { display: flex; height: calc(100vh - 44px); }
         /* #listPane = folder tabs on top + the scrolling message list below. The width/
@@ -39,6 +47,21 @@
         #messageScroll { flex: 0 1 auto; min-height: 0; padding: 20px; overflow-y: auto; }
         #replyBox { flex-shrink: 0; padding: 12px 20px; background: #fff; }
         .itemCard { border: 1px solid #ddd; border-radius: 4px; padding: 10px; margin: 8px 0; background: #fff; }
+        /* Dynamic Report viewer (drView*) — see loadDRReport()/openDRRow(). */
+        .drTableWrap { max-height: 300px; overflow: auto; border: 1px solid #ddd; margin-top: 8px; }
+        .drTable { border-collapse: collapse; font-size: 12px; width: 100%; }
+        .drTable th { position: sticky; top: 0; background: #f0f4fa; text-align: left; padding: 4px 6px; border-bottom: 1px solid #ccc; white-space: nowrap; }
+        .drTable td { padding: 4px 6px; border-bottom: 1px solid #eee; white-space: nowrap; }
+        .drTable tr.drRow { cursor: pointer; }
+        .drTable tr.drRow:hover { background: #eef4ff; }
+        .drTable tr.drRow.selected { background: #dce8ff; }
+        .drPanel { border: 1px solid #ccd; border-radius: 4px; padding: 10px; margin-top: 8px; background: #fafbff; }
+        .drPanel h4 { margin: 12px 0 6px 0; }
+        .drFields td { padding: 3px 6px; font-size: 13px; vertical-align: top; }
+        .drFields input { width: 100%; box-sizing: border-box; }
+        .drList { font-size: 12px; border-collapse: collapse; width: 100%; }
+        .drList td { padding: 3px 6px; border-bottom: 1px solid #eee; }
+        .linkBtn { background: none; border: none; color: #2c6bd6; cursor: pointer; padding: 0; font-size: 12px; }
         .itemCard button { padding: 6px 12px; }
         table.fieldTable { border-collapse: collapse; width: 100%; margin-top: 8px; }
         table.fieldTable td { border: 1px solid #ddd; padding: 6px 8px; font-size: 13px; }
@@ -48,6 +71,7 @@
         .err { color: #c0392b; margin: 8px 0; }
         .hint { color: #777; font-size: 13px; }
         button.primary { background: #2c6bd6; color: #fff; border: none; border-radius: 4px; padding: 8px 16px; cursor: pointer; }
+        button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
         button.secondary { background: #eee; border: 1px solid #ccc; border-radius: 4px; padding: 8px 16px; cursor: pointer; }
         /* ia-viewer.html's ported PopUp() (js/newOpts.js) builds modals as plain divs
            inside its own iframe document — a browser scopes that content to the
@@ -91,6 +115,11 @@
     </style>
 </head>
 <body>
+
+    <div id="startScreen">
+        <img src="loading.gif" width="32" height="32" alt="" /><br /><br />
+        Mailbox loading. Please wait ...
+    </div>
 
     <div id="loginScreen">
         <h2>CMS Mailbox</h2>
@@ -211,6 +240,7 @@
             sessionStorage.removeItem("mbxToken");
             token = "";
             document.getElementById("appScreen").style.display = "none";
+            document.getElementById("startScreen").style.display = "none";
             document.getElementById("loginScreen").style.display = "block";
             document.getElementById("mfaStep").style.display = "none";
             document.getElementById("loginStep").style.display = "block";
@@ -232,7 +262,13 @@
             loadInbox();
         }
 
+        function showLogin() {
+            document.getElementById("startScreen").style.display = "none";
+            document.getElementById("loginScreen").style.display = "block";
+        }
+
         function showApp() {
+            document.getElementById("startScreen").style.display = "none";
             document.getElementById("loginScreen").style.display = "none";
             document.getElementById("appScreen").style.display = "block";
             setFolder("inbox");
@@ -295,6 +331,7 @@
                     var msg = JSON.parse(res.message)[0];
                     var items = JSON.parse(res.items);
                     renderMessage(msg, items);
+                    loadDRViewers();
                     loadInbox(); // refresh read/unread state
                 })
                 .catch(function () {
@@ -324,9 +361,9 @@
             if (isRecipient) {
                 html += "<div id='replyBox'>" +
                     "<input id='replySubject' placeholder='Subject' value='Re: " + escapeHtml(msg.Subject) + "' />" +
-                    "<textarea id='replyBody' placeholder='Message' rows='4'></textarea>" +
+                    "<textarea id='replyBody' placeholder='Message' rows='4' oninput='updateReplyButton()'></textarea>" +
                     "<div class='err' id='replyError'></div>" +
-                    "<button class='primary' onclick='sendReply()'>Send Reply</button> " +
+                    "<button class='primary' id='replySendBtn' onclick='sendReply()' disabled>Send Reply</button> " +
                     "<button class='secondary' onclick='archiveCurrent()'>" + (currentArchived ? "Move to Inbox" : "Archive") + "</button>" +
                     "</div>";
             }
@@ -336,11 +373,13 @@
             items.forEach(function (item) {
                 var card = document.createElement("div");
                 card.className = "itemCard";
+                // Lets refreshTaskCards() find this item's card again.
+                card.setAttribute("data-item-id", item.MessageItemID);
                 if (!isRecipient) {
-                    // In Sent, a task item shows its status — this is how the
-                    // assigner sees whether it has been done yet.
-                    card.innerHTML = taskBanner(item) + "<strong>" + escapeHtml(item.ItemLabel || item.ItemType) + "</strong>" +
-                        "<p class='hint'>Attached to this message. Open it from the message you received, or in CMSNEO.</p>";
+                    // In Sent — see senderCardHtml().
+                    card.setAttribute("data-sender-view", "1");
+                    card.setAttribute("data-task-status", item.TaskStatus || "");
+                    card.innerHTML = senderCardHtml(item);
                     itemsArea.appendChild(card);
                 } else if (item.ItemType === "IAFormRecord") {
                     // Full CMSNEO field-edit/read-only parity, not a flat read-only
@@ -365,6 +404,15 @@
                         "style='width:100%;height:450px;border:1px solid #ccc;margin-top:8px;display:block' " +
                         "title='" + escapeHtml(item.ItemLabel || "Form Application Record") + "'></iframe>";
                     itemsArea.appendChild(card);
+                } else if (item.ItemType === "DRTask") {
+                    // Dynamic Report task (sql/008) — see drCardHtml().
+                    card.setAttribute("data-task-status", item.TaskStatus || "");
+                    card.innerHTML = drCardHtml(item);
+                    itemsArea.appendChild(card);
+                } else if (item.ItemType === "DynamicReport") {
+                    // A completed report carried onto a reply (sql/010) — no task.
+                    card.innerHTML = "<strong>" + escapeHtml(item.ItemLabel || "Dynamic Report") + "</strong>" + drViewerHtml(item.MessageItemID);
+                    itemsArea.appendChild(card);
                 } else {
                     var btn = document.createElement("button");
                     btn.innerText = "Download: " + (item.ItemLabel || item.ItemType);
@@ -375,20 +423,446 @@
             });
         }
 
+        // An item as its sender sees it in Sent: read-only, but a task item shows its
+        // status — this is how the assigner follows progress — and, when the tasks
+        // were sent with "Require my review" (sql/009), a finished task gets a
+        // Mark as Completed button.
+        function senderCardHtml(item) {
+            var html = taskBanner(item) + "<strong>" + escapeHtml(item.ItemLabel || item.ItemType) + "</strong>";
+            if (item.IsAssigner && item.TaskStatus === "Pending Review") {
+                html += "<p class='hint'>The assignee has finished this task. Check it in CMSNEO, then mark it completed.</p>" +
+                    "<button class='primary' id='reviewBtn_" + item.MessageItemID + "' onclick='reviewTask(" + item.MessageItemID + ")'>Mark as Completed</button>" +
+                    "<div class='err' id='reviewMsg_" + item.MessageItemID + "'></div>";
+            } else if (!isOpenableReport(item)) {
+                html += "<p class='hint'>Attached to this message. Open it from the message you received, or in CMSNEO.</p>";
+            }
+            if (isOpenableReport(item)) html += drViewerHtml(item.MessageItemID);
+            return html;
+        }
+
+        function reviewTask(messageItemId) {
+            var btn = document.getElementById("reviewBtn_" + messageItemId);
+            var msg = document.getElementById("reviewMsg_" + messageItemId);
+            btn.disabled = true;
+            api("/item/" + messageItemId + "/task/review", { method: "POST" })
+                .then(function (r) {
+                    if (r.status === 401) { logout(); throw new Error("unauthorized"); }
+                    if (!r.ok) throw new Error("refused");
+                    refreshTaskCards();
+                })
+                .catch(function () {
+                    btn.disabled = false;
+                    msg.innerText = "This task couldn't be marked completed. Refresh the message and try again.";
+                });
+        }
+
+        // Dynamic Report task card (sql/008): download the template, fill it in,
+        // upload it back. DRTaskController serves the template and passes the upload
+        // on to CMSNEO, which builds the report.
+        function drCardHtml(item) {
+            var html = taskBanner(item) + "<strong>" + escapeHtml(item.ItemLabel || "Dynamic Report") + "</strong><div style='margin-top:8px'>";
+            if (!item.IsMyTask) {
+                html += "<p class='hint'>This task is assigned to someone else.</p>";
+            } else {
+                html += "<button class='secondary' onclick='downloadDRTemplate(" + item.MessageItemID + ")'>Download template</button>";
+                if (item.TaskStatus === "Open") {
+                    html += "<p class='hint'>Fill in the template (keep its column headers), then upload it here.</p>" +
+                        "<input type='file' accept='.xlsx' id='drFile_" + item.MessageItemID + "' /> " +
+                        "<button class='primary' id='drUpload_" + item.MessageItemID + "' onclick='uploadDRTask(" + item.MessageItemID + ")'>Upload completed report</button>" +
+                        "<div class='err' id='drMsg_" + item.MessageItemID + "'></div>";
+                } else {
+                    html += "<p class='hint'>Your report was submitted and is now in Dynamic Reports." +
+                        (item.TaskStatus === "Pending Review" ? " It's waiting for the sender's review." : "") + "</p>";
+                }
+            }
+            html += "</div>";
+            if (isOpenableReport(item)) html += drViewerHtml(item.MessageItemID);
+            return html;
+        }
+
+        // After one task changes (a form's first save, a report upload), refresh just
+        // the task lines and Dynamic Report cards — never re-render the whole message,
+        // since a message can hold several tasks and the other forms' iframes may have
+        // unsaved input in them.
+        function refreshTaskCards() {
+            var messageId = currentMessageId;
+            api("/inbox/" + messageId)
+                .then(function (r) { if (!r.ok) throw new Error("not found"); return r.json(); })
+                .then(function (res) {
+                    if (messageId !== currentMessageId) return;
+                    JSON.parse(res.items).forEach(function (item) {
+                        if (!item.TaskID) return;
+                        var card = document.querySelector("#itemsArea [data-item-id='" + item.MessageItemID + "']");
+                        if (!card) return;
+                        // Re-render a whole card only when its status changed — it may
+                        // hold an open report viewer.
+                        var statusChanged = card.getAttribute("data-task-status") !== (item.TaskStatus || "");
+                        card.setAttribute("data-task-status", item.TaskStatus || "");
+                        if (card.getAttribute("data-sender-view")) {
+                            if (statusChanged) card.innerHTML = senderCardHtml(item);
+                            return;
+                        }
+                        if (item.ItemType === "DRTask") {
+                            if (statusChanged) card.innerHTML = drCardHtml(item);
+                            return;
+                        }
+                        var banner = card.querySelector(".taskBanner");
+                        if (banner) banner.outerHTML = taskBanner(item);
+                    });
+                    loadDRViewers();
+                })
+                .catch(function () { /* the cards just keep their previous status */ });
+        }
+
         // Task line shown above an item that carries a task (MBX_Task, sql/006). For a
         // form task MBX_GetMessage derives TaskStatus (sql/007): Open (not started),
         // Saved (record saved but not released yet), Completed (released).
         function taskBanner(item) {
             if (!item.TaskID) return "";
             var done = item.TaskStatus === "Completed";
-            var what = { FormApplication: "Fill out this form and click Save for Use" }[item.TaskType] || "Task";
-            var statusText = { Completed: "Completed", Saved: "Saved - waiting for Save for Use", Cancelled: "Cancelled" }[item.TaskStatus] || "Open";
+            var pending = item.TaskStatus === "Pending Review";
+            var what = {
+                FormApplication: "Fill out this form and click Save for Use",
+                DynamicReport: "Fill in the Excel template and upload it"
+            }[item.TaskType] || "Task";
+            var statusText = {
+                Completed: "Completed",
+                "Pending Review": "Pending Review",
+                Saved: "Saved - waiting for Save for Use",
+                Cancelled: "Cancelled"
+            }[item.TaskStatus] || "Open";
             // DueDate is a SQL date (serialized as midnight) — show the date part as-is
             // rather than letting a timezone conversion shift it a day.
             var due = item.DueDate ? " &middot; Due " + escapeHtml(String(item.DueDate).substring(0, 10)) : "";
             return "<div class='taskBanner' style='padding:6px 10px;margin-bottom:8px;border-radius:3px;" +
-                (done ? "background:#e6f4ea;color:#1e6b34" : "background:#fff4e0;color:#8a5300") + "'>" +
+                (done ? "background:#e6f4ea;color:#1e6b34" : pending ? "background:#e8f0fe;color:#1a4a9c" : "background:#fff4e0;color:#8a5300") + "'>" +
                 "<b>Task:</b> " + what + due + " &middot; <b>" + statusText + "</b></div>";
+        }
+
+        // ---- Dynamic Report viewer (sql/010, DRViewController) ----------------
+        // A completed report: its rows in a table; clicking a row opens a panel with
+        // its values (editable when it's your own company's row, read-only otherwise),
+        // notes, and attachments. Every request is access-checked server-side.
+
+        function isOpenableReport(item) {
+            return (item.ItemType === "DRTask" || item.ItemType === "DynamicReport") && item.ItemID && item.ItemID !== "0";
+        }
+
+        function drViewerHtml(messageItemId) {
+            return "<div class='drView' id='drView_" + messageItemId + "' data-item='" + messageItemId + "'>" +
+                "<p class='hint'>Loading report ...</p></div>";
+        }
+
+        // Loads every viewer on the page that hasn't been loaded yet.
+        function loadDRViewers() {
+            document.querySelectorAll(".drView:not([data-loaded])").forEach(function (div) {
+                div.setAttribute("data-loaded", "1");
+                loadDRReport(parseInt(div.getAttribute("data-item"), 10));
+            });
+        }
+
+        // Columns NEO_GetDynamicReportsALL2 returns that aren't report data.
+        function drIsDataColumn(key) {
+            return key.indexOf("xxx") !== 0 && key.indexOf("DR_") !== 0 && ["xCID", "hdrs"].indexOf(key) === -1;
+        }
+
+        function loadDRReport(messageItemId, reopenDrid) {
+            var div = document.getElementById("drView_" + messageItemId);
+            if (!div) return;
+            api("/item/" + messageItemId + "/report")
+                .then(function (r) { if (!r.ok) throw new Error("denied"); return r.text(); })
+                .then(function (txt) {
+                    var rows = JSON.parse(txt).filter(function (d) { return d.xxxIX > 0; });
+                    if (rows.length === 0) { div.innerHTML = "<p class='hint'>This report has no rows you can view.</p>"; return; }
+
+                    var cols = Object.keys(rows[0]).filter(drIsDataColumn);
+                    // Attachments last, as in CMSNEO.
+                    cols = cols.filter(function (c) { return c !== "Attachments"; })
+                        .concat(cols.indexOf("Attachments") > -1 ? ["Attachments"] : []);
+
+                    var html = "<p class='hint' style='margin:8px 0 0 0'>Click a row to see its details, notes and attachments.</p>" +
+                        "<div class='drTableWrap'><table class='drTable'><tr>" +
+                        cols.map(function (c) { return "<th>" + escapeHtml(c.replace(/_/g, " ")) + "</th>"; }).join("") + "</tr>";
+                    rows.forEach(function (row) {
+                        html += "<tr class='drRow' id='drRow_" + messageItemId + "_" + row.xxxID + "' onclick='openDRRow(" + messageItemId + "," + row.xxxID + ")'>" +
+                            cols.map(function (c) { return "<td>" + escapeHtml(row[c] == null ? "" : row[c]) + "</td>"; }).join("") + "</tr>";
+                    });
+                    html += "</table></div><div id='drPanel_" + messageItemId + "'></div>";
+                    div.innerHTML = html;
+                    if (reopenDrid) openDRRow(messageItemId, reopenDrid);
+                })
+                .catch(function () { div.innerHTML = "<p class='err'>This report couldn't be loaded.</p>"; });
+        }
+
+        function openDRRow(messageItemId, drid) {
+            var panel = document.getElementById("drPanel_" + messageItemId);
+            if (!panel) return;
+            document.querySelectorAll("#drView_" + messageItemId + " tr.drRow").forEach(function (tr) {
+                tr.classList.toggle("selected", tr.id === "drRow_" + messageItemId + "_" + drid);
+            });
+            panel.innerHTML = "<div class='drPanel'><p class='hint'>Loading ...</p></div>";
+
+            api("/item/" + messageItemId + "/report/row/" + drid)
+                .then(function (r) { if (!r.ok) throw new Error("denied"); return r.json(); })
+                .then(function (res) { renderDRRow(messageItemId, drid, res); })
+                .catch(function () { panel.innerHTML = "<div class='drPanel'><p class='err'>This row couldn't be loaded.</p></div>"; });
+        }
+
+        function renderDRRow(messageItemId, drid, res) {
+            var panel = document.getElementById("drPanel_" + messageItemId);
+            var fields = JSON.parse(res.fields)[0] || {};
+            var docs = JSON.parse(res.docs);
+            var notes = JSON.parse(res.notes);
+            var shares = JSON.parse(res.shareCompanies);
+            var p = messageItemId + "_" + drid;
+
+            // Fields — same rules as CMSNEO's DynamicRecordOptions(): CID/Inactive/
+            // ReportID hidden; Loaded By/Company/Status/Attachments always read-only;
+            // everything else editable only on your own company's row.
+            var html = "<div class='drPanel'><button class='linkBtn' style='float:right' onclick='closeDRRow(" + messageItemId + ")'>Close</button>" +
+                "<h4 style='margin-top:0'>Details</h4><table class='drFields' style='width:100%'>";
+            Object.keys(fields).forEach(function (key) {
+                if (["CID", "Inactive", "ReportID"].indexOf(key) > -1) return;
+                var val = fields[key] == null || fields[key] === "1900-01-01T00:00:00" ? "" : String(fields[key]);
+                var label = "<td style='width:30%;white-space:nowrap'>" + escapeHtml(key.trim().replace(/_/g, " ")) + "</td>";
+                if (!res.isMine || ["Loaded_By", "Company", "Status", "Attachments"].indexOf(key) > -1) {
+                    html += "<tr>" + label + "<td>" + escapeHtml(val) + "</td></tr>";
+                } else {
+                    var isDate = key.toLowerCase().indexOf("date") > -1 && (val === "" || /^\d{4}-\d{2}-\d{2}/.test(val));
+                    html += "<tr>" + label + "<td><input name='drVal_" + p + "' data-key='" + escapeHtml(key) + "'" +
+                        (isDate ? " type='date' value='" + escapeHtml(val.substring(0, 10)) + "'" : " value='" + escapeHtml(val) + "'") +
+                        " /></td></tr>";
+                }
+            });
+            html += "</table>";
+            if (res.isMine) {
+                html += "<button class='primary' id='drSave_" + p + "' onclick='saveDRRow(" + messageItemId + "," + drid + ")'>Submit Changes</button> " +
+                    "<span class='err' id='drSaveMsg_" + p + "'></span>";
+            }
+
+            // Notes — one entry per note (NEO_GetFileNotes returns a row per shared company).
+            var byNid = {}, order = [];
+            notes.forEach(function (n) {
+                if (!byNid[n.NID]) { byNid[n.NID] = { n: n, shared: [] }; order.push(n.NID); }
+                if (n.Shared_With) byNid[n.NID].shared.push(n.Shared_With);
+            });
+            html += "<h4>Notes</h4>";
+            if (order.length === 0) {
+                html += "<p class='hint'>No notes yet.</p>";
+            } else {
+                html += "<table class='drList'>";
+                order.forEach(function (nid) {
+                    var x = byNid[nid];
+                    html += "<tr><td>" + escapeHtml(x.n.Note).replace(/\n/g, "<br/>") + "</td>" +
+                        "<td style='white-space:nowrap'>" + escapeHtml(x.n.Created_By) + "<br/>" + new Date(x.n.Date_Created).toLocaleString() + "</td>" +
+                        "<td>" + (x.shared.length ? "Shared with " + escapeHtml(x.shared.join(", ")) : "Your company only") + "</td>" +
+                        "<td>" + (x.n.CreatedByUID === res.myUID
+                            ? "<button class='linkBtn' onclick=\"deleteDRNote(" + messageItemId + "," + drid + ",'" + escapeHtml(x.n.NID) + "')\">Delete</button>"
+                            : "") +
+                        "</td></tr>";
+                });
+                html += "</table>";
+            }
+            html += "<textarea id='drNote_" + p + "' rows='2' style='width:100%;box-sizing:border-box;margin-top:6px' placeholder='Add a note'></textarea>";
+            if (shares.length > 0) {
+                html += "<div class='hint'>Share with: " + shares.map(function (c) {
+                    return "<label style='margin-right:10px'><input type='checkbox' name='drShare_" + p + "' value='" + c.CID + "' checked /> " +
+                        escapeHtml(c.Company) + "</label>";
+                }).join("") + "</div>";
+            }
+            html += "<button class='secondary' onclick='addDRNote(" + messageItemId + "," + drid + ")'>Add note</button> " +
+                "<span class='err' id='drNoteMsg_" + p + "'></span>";
+
+            // Attachments
+            html += "<h4>Attachments</h4>";
+            if (docs.length === 0) {
+                html += "<p class='hint'>No attachments yet.</p>";
+            } else {
+                html += "<table class='drList'>";
+                docs.forEach(function (d) {
+                    html += "<tr><td><button class='linkBtn' onclick='downloadDRDoc(" + messageItemId + "," + drid + "," + d.FID + ")'>" +
+                        escapeHtml(d.Filename) + "</button></td>" +
+                        "<td>" + escapeHtml(d.Created_By) + " (" + escapeHtml(d.Company) + ")</td>" +
+                        "<td>" + new Date(d.Date_Loaded).toLocaleString() + "</td>" +
+                        "<td>" + (d.IsMine ? "<button class='linkBtn' onclick='deleteDRDoc(" + messageItemId + "," + drid + "," + d.FID + ")'>Delete</button>" : "") +
+                        "</td></tr>";
+                });
+                html += "</table>";
+            }
+            html += "<input type='file' multiple id='drDocs_" + p + "' style='margin-top:6px' /> " +
+                "<button class='secondary' onclick='uploadDRDocs(" + messageItemId + "," + drid + ")'>Upload</button> " +
+                "<span class='err' id='drDocMsg_" + p + "'></span>";
+
+            panel.innerHTML = html + "</div>";
+        }
+
+        function closeDRRow(messageItemId) {
+            document.getElementById("drPanel_" + messageItemId).innerHTML = "";
+            document.querySelectorAll("#drView_" + messageItemId + " tr.drRow.selected").forEach(function (tr) { tr.classList.remove("selected"); });
+        }
+
+        function saveDRRow(messageItemId, drid) {
+            var p = messageItemId + "_" + drid;
+            var keys = [], vals = [];
+            document.getElementsByName("drVal_" + p).forEach(function (inp) {
+                keys.push(inp.getAttribute("data-key"));
+                vals.push(inp.value);
+            });
+            var btn = document.getElementById("drSave_" + p);
+            btn.disabled = true;
+            api("/item/" + messageItemId + "/report/row/" + drid, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ Keys: keys, Vals: vals })
+            })
+                .then(function (r) {
+                    if (!r.ok) throw new Error("failed");
+                    loadDRReport(messageItemId, drid); // table + this row, with the saved values
+                })
+                .catch(function () {
+                    btn.disabled = false;
+                    document.getElementById("drSaveMsg_" + p).innerText = "Your changes couldn't be saved.";
+                });
+        }
+
+        function addDRNote(messageItemId, drid) {
+            var p = messageItemId + "_" + drid;
+            var note = document.getElementById("drNote_" + p).value.trim();
+            var msg = document.getElementById("drNoteMsg_" + p);
+            if (note === "") { msg.innerText = "Type a note first."; return; }
+            var share = [];
+            document.getElementsByName("drShare_" + p).forEach(function (c) { if (c.checked) share.push(parseInt(c.value, 10)); });
+            api("/item/" + messageItemId + "/report/row/" + drid + "/notes", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ Note: note, ShareWith: share })
+            })
+                .then(function (r) { if (!r.ok) throw new Error("failed"); openDRRow(messageItemId, drid); })
+                .catch(function () { msg.innerText = "The note couldn't be added."; });
+        }
+
+        function deleteDRNote(messageItemId, drid, nid) {
+            if (!confirm("Delete this note?")) return;
+            api("/item/" + messageItemId + "/report/row/" + drid + "/notes/" + encodeURIComponent(nid), { method: "DELETE" })
+                .then(function (r) { if (!r.ok) throw new Error("failed"); openDRRow(messageItemId, drid); })
+                .catch(function () { alert("The note couldn't be deleted."); });
+        }
+
+        function uploadDRDocs(messageItemId, drid) {
+            var p = messageItemId + "_" + drid;
+            var input = document.getElementById("drDocs_" + p);
+            var msg = document.getElementById("drDocMsg_" + p);
+            if (!input.files.length) { msg.innerText = "Choose a file first."; return; }
+            var fd = new FormData();
+            for (var i = 0; i < input.files.length; i++) fd.append("file" + i, input.files[i]);
+            msg.innerText = "Uploading ...";
+            api("/item/" + messageItemId + "/report/row/" + drid + "/docs", { method: "POST", body: fd })
+                .then(function (r) {
+                    if (!r.ok) throw new Error("failed");
+                    loadDRReport(messageItemId, drid); // the Attachments count in the table changes too
+                })
+                .catch(function () { msg.innerText = "The upload failed."; });
+        }
+
+        function deleteDRDoc(messageItemId, drid, fid) {
+            if (!confirm("Delete this attachment?")) return;
+            api("/item/" + messageItemId + "/report/row/" + drid + "/docs/" + fid, { method: "DELETE" })
+                .then(function (r) { if (!r.ok) throw new Error("failed"); loadDRReport(messageItemId, drid); })
+                .catch(function () { alert("The attachment couldn't be deleted."); });
+        }
+
+        // The server sends the attachment's own filename (Content-Disposition).
+        function downloadDRDoc(messageItemId, drid, fid) {
+            api("/item/" + messageItemId + "/report/row/" + drid + "/docs/" + fid)
+                .then(function (r) {
+                    if (!r.ok) throw new Error("denied");
+                    var cd = r.headers.get("Content-Disposition") || "";
+                    var m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(cd);
+                    var name = m ? decodeURIComponent(m[1]) : "attachment";
+                    return r.blob().then(function (blob) { return { blob: blob, name: name }; });
+                })
+                .then(function (f) {
+                    var url = URL.createObjectURL(f.blob);
+                    var a = document.createElement("a");
+                    a.href = url;
+                    a.download = f.name;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                })
+                .catch(function () { alert("The attachment couldn't be downloaded."); });
+        }
+
+        function downloadDRTemplate(messageItemId) {
+            api("/item/" + messageItemId + "/drtask/template")
+                .then(function (r) {
+                    if (!r.ok) throw new Error("denied");
+                    var cd = r.headers.get("Content-Disposition") || "";
+                    var m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(cd);
+                    var name = m ? decodeURIComponent(m[1]) : "template.xlsx";
+                    return r.blob().then(function (blob) { return { blob: blob, name: name }; });
+                })
+                .then(function (f) {
+                    var url = URL.createObjectURL(f.blob);
+                    var a = document.createElement("a");
+                    a.href = url;
+                    a.download = f.name;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                })
+                .catch(function () { alert("The template could not be downloaded."); });
+        }
+
+        // CMSNEO's MailboxDRTaskSubmit status codes, in words.
+        var drTaskErrors = {
+            already_completed: "This task has already been completed.",
+            file_required: "Choose the filled-in Excel file first.",
+            file_unreadable: "That file couldn't be read. Upload an .xlsx file.",
+            no_rows: "The file has no data rows.",
+            too_many_rows: "The file has more than 500 rows.",
+            forbidden: "Your account doesn't have access to Dynamic Reports.",
+            proxy_failed: "The report couldn't be submitted right now. Please try again later."
+        };
+
+        function uploadDRTask(messageItemId) {
+            var input = document.getElementById("drFile_" + messageItemId);
+            var msg = document.getElementById("drMsg_" + messageItemId);
+            var btn = document.getElementById("drUpload_" + messageItemId);
+            msg.innerHTML = "";
+            if (!input.files[0]) { msg.innerText = drTaskErrors.file_required; return; }
+
+            var fd = new FormData();
+            fd.append("file", input.files[0]);
+            btn.disabled = true;
+            msg.innerText = "Uploading ...";
+            api("/item/" + messageItemId + "/drtask/submit", { method: "POST", body: fd })
+                .then(function (r) {
+                    if (r.status === 401) { logout(); throw new Error("unauthorized"); }
+                    if (!r.ok) throw new Error("denied");
+                    return r.json();
+                })
+                .then(function (res) {
+                    if (res.status === "ok") {
+                        refreshTaskCards();
+                        return;
+                    }
+                    btn.disabled = false;
+                    if (res.status === "headers_mismatch") {
+                        var parts = [];
+                        if (res.missing && res.missing.length) parts.push("Missing columns: " + res.missing.join(", "));
+                        if (res.extra && res.extra.length) parts.push("Columns not in the template: " + res.extra.join(", "));
+                        msg.innerText = "The file's columns don't match the template. " + parts.join(". ") + ".";
+                    } else {
+                        msg.innerText = drTaskErrors[res.status] || ("The report couldn't be submitted (" + res.status + ").");
+                    }
+                })
+                .catch(function () {
+                    btn.disabled = false;
+                    msg.innerText = "The report couldn't be submitted.";
+                });
         }
 
         function downloadItem(messageItemId, label) {
@@ -410,8 +884,16 @@
                 .catch(function () { alert("You no longer have access to this item."); });
         }
 
+        // Send Reply stays disabled until the message body has something in it
+        // (whitespace doesn't count).
+        function updateReplyButton() {
+            var btn = document.getElementById("replySendBtn");
+            if (btn) btn.disabled = document.getElementById("replyBody").value.trim() === "";
+        }
+
         function sendReply() {
             var errDiv = document.getElementById("replyError");
+            if (document.getElementById("replyBody").value.trim() === "") return;
             var body = {
                 Subject: document.getElementById("replySubject").value,
                 Body: document.getElementById("replyBody").value
@@ -427,6 +909,7 @@
                 })
                 .then(function () {
                     document.getElementById("replyBody").value = "";
+                    updateReplyButton();
                     loadInbox();
                     errDiv.innerText = "Reply sent.";
                 })
@@ -498,12 +981,20 @@
 
         window.addEventListener("message", function (event) {
             if (event.origin !== window.location.origin) return;
-            // ia-viewer.html's mbxNewRecordSaved(): a new-record task was just saved.
-            // Re-open the message so the item shows the saved record and the task's
-            // new status.
-            if (event.data && event.data.mbxTaskSaved) {
-                mbxClearFullscreen();
-                if (currentMessageId) openMessage(currentMessageId);
+            // ia-viewer.html's mbxRecordSaved(): a record was just saved. Reload only
+            // that iframe (a new-record task's item now points at the saved record)
+            // and refresh the task lines — not the whole message, whose other forms
+            // may have unsaved input.
+            if (event.data && event.data.mbxRecordSaved) {
+                var saved = document.querySelectorAll("#messagePane iframe");
+                for (var j = 0; j < saved.length; j++) {
+                    if (saved[j].contentWindow === event.source) {
+                        if (mbxFullscreenFrame === saved[j]) mbxClearFullscreen();
+                        saved[j].src = saved[j].src;
+                        break;
+                    }
+                }
+                refreshTaskCards();
                 return;
             }
             if (!event.data || (event.data.mbxPopup !== "open" && event.data.mbxPopup !== "closed")) return;
@@ -540,7 +1031,70 @@
             mbxClearFullscreen();
         }
 
-        if (token) { showApp(); }
+        // One-time handoff codes from CMSNEO's Items Alerted On (sql/011): a 60-second,
+        // single-use code for a user CMSNEO has already logged in with the same
+        // password + 2FA. Exchanged here for this app's own login. On failure nothing
+        // changes (existing session, or the login screen).
+        function redeemHandoff(code) {
+            return fetch(apiBase + "/auth/handoff", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ Code: code })
+            })
+                .then(function (r) { return r.json(); })
+                .then(function (res) {
+                    if (res.status !== "ok") return null;
+                    token = res.token;
+                    sessionStorage.setItem("mbxToken", token);
+                    return res;
+                })
+                .catch(function () { return null; });
+        }
+
+        // CMSNEO reuses this tab when it's already open: instead of reloading it, it
+        // posts {mbxHandoff: code} here (see OpenMailboxMessage in CMSNEO's global.js).
+        // Accepted only from CMSNEO's own origin (auth/cms-origin) — otherwise another
+        // site holding a reference to this tab could push its own code and switch the
+        // user into a different account. Acknowledged so CMSNEO doesn't fall back to
+        // reloading the tab.
+        var cmsOrigin = null;
+        api("/auth/cms-origin")
+            .then(function (r) { return r.json(); })
+            .then(function (res) { cmsOrigin = res.origin || null; })
+            .catch(function () { });
+
+        window.addEventListener("message", function (event) {
+            if (!event.data || typeof event.data.mbxHandoff !== "string") return;
+            if (!cmsOrigin || event.origin !== cmsOrigin) return;
+            if (event.source) event.source.postMessage({ mbxHandoffAck: true }, event.origin);
+
+            redeemHandoff(event.data.mbxHandoff).then(function (res) {
+                if (!res) return;
+                if (document.getElementById("appScreen").style.display !== "block") {
+                    if (res.messageId) window.history.replaceState({}, "", window.location.pathname + "?message=" + res.messageId);
+                    showApp(); // opens ?message= once and strips it
+                } else if (res.messageId) {
+                    // Already in the app (possibly as someone else before) — show this
+                    // message from the Inbox.
+                    if (currentFolder !== "inbox") setFolder("inbox"); else loadInbox();
+                    openMessage(res.messageId);
+                }
+            });
+        });
+
+        // Startup. ?handoff=<code> (a fresh tab from CMSNEO): strip it from the address
+        // bar first, then exchange it.
+        (function startup() {
+            var code = new URLSearchParams(window.location.search).get("handoff");
+            if (!code) { if (token) showApp(); else showLogin(); return; }
+
+            window.history.replaceState({}, "", window.location.pathname);
+            redeemHandoff(code).then(function (res) {
+                // showApp() opens ?message= once and strips it again.
+                if (res && res.messageId) window.history.replaceState({}, "", window.location.pathname + "?message=" + res.messageId);
+                if (token) showApp(); else showLogin();
+            });
+        })();
     </script>
 </body>
 </html>

@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using Google.Authenticator;
 using Microsoft.AspNetCore.Mvc;
 using Newtonsoft.Json.Linq;
@@ -15,6 +16,9 @@ namespace CMSMailbox.Controllers
     // login->2FA handoff uses a short-lived signed "pending" token instead (see
     // TokenGenerator.GeneratePendingMfaToken), and a successful 2FA check issues this
     // app's own session JWT directly.
+    //
+    // The one exception is auth/handoff: a one-time code CMSNEO issues to a user who
+    // has already passed this same check there (Items Alerted On → open a message).
     [Route("auth")]
     public class AuthController : Controller
     {
@@ -97,6 +101,40 @@ namespace CMSMailbox.Controllers
             return Ok(new { status = "ok", token });
         }
 
+        // One-time handoff from CMSNEO's Items Alerted On (sql/011). CMSNEO issued the
+        // code to a user who had already passed this same NEO_Login + 2FA check there;
+        // MBX_RedeemHandoffCode accepts each code once, within 60 seconds, atomically.
+        // Any failure looks the same to the caller and they get the normal login page.
+        [HttpPost("handoff")]
+        public IActionResult Handoff([FromBody] HandoffRequest req)
+        {
+            string code = req?.Code ?? "";
+            if (code.Length != 64 || !code.All(Uri.IsHexDigit)) return Ok(new { status = "invalid_or_expired" });
+
+            var dat = DB.GetDB("exec MBX_RedeemHandoffCode @code", 0, new JObject { ["code"] = code }.ToString());
+            if (dat.Rows.Count == 0 || dat.Columns.Contains("err") || !int.TryParse(dat.Rows[0]["UID"].ToString(), out int uid) || uid <= 0)
+            {
+                return Ok(new { status = "invalid_or_expired" });
+            }
+
+            var tg = new TokenGenerator();
+            string token = tg.GenerateToken(uid.ToString());
+            object messageId = dat.Rows[0]["MessageID"] == DBNull.Value ? null : dat.Rows[0]["MessageID"];
+
+            return Ok(new { status = "ok", token, messageId });
+        }
+
+        // CMSNEO's origin (scheme://host:port of AppSettings:CmsUrl) — not a secret. The
+        // page accepts a handoff code posted from another tab (CMSNEO reusing an
+        // already-open mailbox tab) only from this origin, so no other site can push
+        // its own code into it and switch the user to a different account.
+        [HttpGet("cms-origin")]
+        public IActionResult CmsOrigin()
+        {
+            string origin = Uri.TryCreate(DB.CmsUrl ?? "", UriKind.Absolute, out var u) ? u.GetLeftPart(UriPartial.Authority) : "";
+            return Ok(new { origin });
+        }
+
         // Mirrors CMS's Validate action (HomeController.cs ~4445) for the new-IP
         // verification email link, against the same a_Suite_ValidateIP proc.
         [HttpGet("/Validate")]
@@ -130,5 +168,10 @@ namespace CMSMailbox.Controllers
     {
         public string PendingToken { get; set; }
         public string Passcode { get; set; }
+    }
+
+    public class HandoffRequest
+    {
+        public string Code { get; set; }
     }
 }

@@ -4176,13 +4176,18 @@ function SubmitRecord(mainid, released) {
                             PopUp("Clone Record Attachments and Notes", [mainid, cloneID], null, null, ["150px", "500px"]);
                         }
 
-                        // CMSMailbox adaptation: first save of a new-record task
-                        // (ia-viewer.html sets MBX_NewRecordMode). The server has
-                        // just linked the new MainID to this message item, so hand
-                        // off to ia-viewer.html to re-open it as a normal record
-                        // rather than running CMS's report-grid refresh.
-                        if (typeof MBX_NewRecordMode !== "undefined" && MBX_NewRecordMode) {
-                            mbxNewRecordSaved();
+                        // CMSMailbox adaptation: after ANY save, hand off to
+                        // ia-viewer.html (mbxRecordSaved) to re-open this one record
+                        // and refresh the message's task status — instead of CMS's
+                        // GetMain() report-grid refresh, which needs CMS page elements
+                        // (displayReport, ...) this viewer doesn't have and threw
+                        // after every save. For a new-record task's first save, the
+                        // server has just linked the new MainID to this message item,
+                        // so the re-open shows it as a normal record. CMS's release
+                        // alert (SendEmailAlert) isn't sent from here: its
+                        // _GetEmailAlert isn't on IaViewerController's allowlist.
+                        if (typeof mbxRecordSaved === "function") {
+                            mbxRecordSaved();
                             return;
                         }
 

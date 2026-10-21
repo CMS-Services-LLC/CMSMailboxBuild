@@ -101,12 +101,13 @@
   <script src="js/InteractiveForm.js" asp-append-version="true"></script>
 
   <script>
-    // Called by the patched SubmitRecord() after the first save of a new-record task.
-    // Inside the mailbox, index.html re-opens the message (the item now points at
-    // the saved record and the task shows its new status); opened on its own, just reload.
-    function mbxNewRecordSaved() {
+    // Called by the patched SubmitRecord() after every save (in place of CMS's
+    // report-grid refresh). Inside the mailbox, index.html reloads this iframe and
+    // refreshes the message's task status (a first save links a new-record task's
+    // record; Save for Use can finish a task); opened on its own, just reload.
+    function mbxRecordSaved() {
       if (window.parent && window.parent !== window) {
-        window.parent.postMessage({ mbxTaskSaved: true }, window.location.origin);
+        window.parent.postMessage({ mbxRecordSaved: true }, window.location.origin);
       } else {
         window.location.reload();
       }
@@ -162,10 +163,6 @@
         myUID = ctx.myUID;
         currentFormID = ctx.formId;
         ME = { Security: jparse(ctx.security) };
-        // A FormApplication task that hasn't been started: ctx.mainId is 0 and
-        // ViewDisp(0, formId) renders a blank new record. Read by the patched
-        // SubmitRecord() in js/InteractiveForm.js.
-        window.MBX_NewRecordMode = !!ctx.newRecord;
 
         // Build dispMain/dispReportOuter as CHILDREN of PageContainer — see the HTML
         // comment above; this is the DOM-structure part of iaStartMe() this viewer
