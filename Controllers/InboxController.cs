@@ -6,20 +6,26 @@ namespace CMSMailbox.Controllers
     [Route("inbox")]
     public class InboxController : MailboxControllerBase
     {
+        // Folder is an allowlist, not passed through blindly — MBX_GetFolder also
+        // returns nothing for anything it doesn't recognize, but there's no reason to
+        // let an arbitrary string reach it.
         [HttpGet("")]
-        public IActionResult GetInbox()
+        public IActionResult GetInbox([FromQuery] string folder = "inbox")
         {
             int uid = CurrentUID();
             if (uid == 0) return Unauthorized();
 
-            var dat = DB.GetDB("exec MBX_GetInbox @uid", uid);
+            if (folder != "inbox" && folder != "archived" && folder != "sent") return BadRequest();
+
+            var dat = DB.GetDB("exec MBX_GetFolder @uid, @folder", uid,
+                new Newtonsoft.Json.Linq.JObject { ["folder"] = folder }.ToString());
             return Ok(JsonConvert.SerializeObject(dat));
         }
 
         // Returns the message header + its item list (ItemType/ItemID/ItemLabel only —
         // no bytes here; bytes are only ever served by ItemController after a fresh
         // per-item access re-check). MBX_GetMessage itself gates on the caller
-        // actually being a recipient of this message.
+        // being a recipient OR the author of this message (author = the Sent folder).
         [HttpGet("{messageId:int}")]
         public IActionResult GetMessage(int messageId)
         {

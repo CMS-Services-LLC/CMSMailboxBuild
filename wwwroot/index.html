@@ -16,7 +16,14 @@
         #appScreen { display: none; height: 100vh; }
         #topBar { background: #1a2c42; color: #fff; padding: 10px 16px; display: flex; justify-content: space-between; align-items: center; }
         #layout { display: flex; height: calc(100vh - 44px); }
-        #inboxList { width: 320px; overflow-y: auto; background: #fff; border-right: 1px solid #ddd; }
+        /* #listPane = folder tabs on top + the scrolling message list below. The width/
+           background/border that used to live on #inboxList moved up to the wrapper. */
+        #listPane { width: 320px; display: flex; flex-direction: column; background: #fff; border-right: 1px solid #ddd; min-height: 0; }
+        #folderTabs { display: flex; flex-shrink: 0; border-bottom: 1px solid #ddd; }
+        #folderTabs button { flex: 1; padding: 10px 0; background: #fff; border: none; border-bottom: 3px solid transparent; cursor: pointer; font-size: 14px; color: #555; }
+        #folderTabs button:hover { background: #f0f4fa; }
+        #folderTabs button.active { color: #2c6bd6; border-bottom-color: #2c6bd6; font-weight: bold; }
+        #inboxList { flex: 1; min-height: 0; overflow-y: auto; }
         .msgRow { padding: 10px 14px; border-bottom: 1px solid #eee; cursor: pointer; }
         .msgRow:hover { background: #f0f4fa; }
         .msgRow.unread { font-weight: bold; }
@@ -108,7 +115,14 @@
             <button class="secondary" onclick="logout()">Log Out</button>
         </div>
         <div id="layout">
-            <div id="inboxList"></div>
+            <div id="listPane">
+                <div id="folderTabs">
+                    <button id="tab_inbox" class="active" onclick="setFolder('inbox')">Inbox</button>
+                    <button id="tab_sent" onclick="setFolder('sent')">Sent</button>
+                    <button id="tab_archived" onclick="setFolder('archived')">Archived</button>
+                </div>
+                <div id="inboxList"></div>
+            </div>
             <div id="messagePane"><p class="hint" style="padding:10px">Select a message.</p></div>
         </div>
     </div>
@@ -120,6 +134,9 @@
         var token = sessionStorage.getItem("mbxToken") || "";
         var pendingToken = "";
         var currentMessageId = null;
+        var currentFolder = "inbox";   // "inbox" | "sent" | "archived"
+        var currentArchived = false;   // whether the open message is archived (recipient's own flag)
+        var EMPTY_PANE_HTML = "<p class=\"hint\" style=\"padding:10px\">Select a message.</p>";
 
         function api(path, opts) {
             opts = opts || {};
@@ -200,10 +217,25 @@
             document.getElementById("passcode").value = "";
         }
 
+        // Switching folders always clears the open message — it may not belong to the
+        // folder being switched to (an archived message isn't in Inbox, etc.).
+        function setFolder(folder) {
+            currentFolder = folder;
+            currentMessageId = null;
+            ["inbox", "sent", "archived"].forEach(function (f) {
+                document.getElementById("tab_" + f).classList.toggle("active", f === folder);
+            });
+            document.getElementById("messagePane").innerHTML = EMPTY_PANE_HTML;
+            // Don't leave the previous folder's rows on screen under the new tab while
+            // the new list is still loading.
+            document.getElementById("inboxList").innerHTML = "<p class='hint' style='padding:14px'>Loading...</p>";
+            loadInbox();
+        }
+
         function showApp() {
             document.getElementById("loginScreen").style.display = "none";
             document.getElementById("appScreen").style.display = "block";
-            loadInbox();
+            setFolder("inbox");
 
             // Deep link from the share-notification email (?message=<id>) — open it
             // once, then strip the query string so a page refresh doesn't re-trigger it.
@@ -215,26 +247,36 @@
             }
         }
 
+        // Loads whichever folder is current. `folder` is captured up front so a slow
+        // response for a folder the user has already clicked away from can't paint over
+        // the list for the one they're now looking at.
         function loadInbox() {
-            api("/inbox")
+            var folder = currentFolder;
+            api("/inbox?folder=" + folder)
                 .then(function (r) {
                     if (r.status === 401) { logout(); throw new Error("unauthorized"); }
                     return r.text();
                 })
                 .then(function (txt) {
+                    if (folder !== currentFolder) return;
                     var rows = JSON.parse(txt);
                     var list = document.getElementById("inboxList");
                     list.innerHTML = "";
                     if (rows.length === 0) {
-                        list.innerHTML = "<p class='hint' style='padding:14px'>No messages.</p>";
+                        var emptyText = { inbox: "No messages.", sent: "No sent messages.", archived: "No archived messages." }[folder];
+                        list.innerHTML = "<p class='hint' style='padding:14px'>" + emptyText + "</p>";
                         return;
                     }
                     rows.forEach(function (m) {
                         var div = document.createElement("div");
-                        div.className = "msgRow" + (m.DTViewed ? "" : " unread");
+                        // Unread emphasis only means something in the Inbox.
+                        div.className = "msgRow" + (folder === "inbox" && !m.DTViewed ? " unread" : "");
                         div.onclick = function () { openMessage(m.MessageID); };
+                        var who = folder === "sent"
+                            ? "To " + escapeHtml(m.ToNames || "")
+                            : escapeHtml(m.FromName) + " (" + escapeHtml(m.FromCompany) + ")";
                         div.innerHTML = "<span class='subj'>" + escapeHtml(m.Subject) + "</span>" +
-                            "<span class='meta'>" + escapeHtml(m.FromName) + " (" + escapeHtml(m.FromCompany) + ") &middot; " +
+                            "<span class='meta'>" + who + " &middot; " +
                             new Date(m.DTCreated).toLocaleString() + "</span>";
                         list.appendChild(div);
                     });
@@ -262,28 +304,43 @@
 
         function renderMessage(msg, items) {
             var pane = document.getElementById("messagePane");
+            // Server-supplied: a recipient gets Archive + Reply; someone who only
+            // AUTHORED the message (the Sent folder) gets a read-only view — archiving
+            // is a per-recipient flag they don't have, and every item-access check
+            // (IaViewerController/ItemController) requires being a recipient.
+            var isRecipient = !!msg.IsRecipient;
+            currentArchived = !!msg.IsArchived;
+
             var html = "<div id='messageScroll'>";
             html += "<h3>" + escapeHtml(msg.Subject) + "</h3>";
-            html += "<p class='hint'>From " + escapeHtml(msg.FromName) + " (" + escapeHtml(msg.FromCompany) + ") &middot; " + new Date(msg.DTCreated).toLocaleString() + "</p>";
+            html += isRecipient
+                ? "<p class='hint'>From " + escapeHtml(msg.FromName) + " (" + escapeHtml(msg.FromCompany) + ") &middot; " + new Date(msg.DTCreated).toLocaleString() + "</p>"
+                : "<p class='hint'>To " + escapeHtml(msg.ToNames || "") + " &middot; " + new Date(msg.DTCreated).toLocaleString() + "</p>";
             html += "<p>" + escapeHtml(msg.Body || "").replace(/\n/g, "<br/>") + "</p>";
             html += "<div id='itemsArea'></div>";
             html += "</div>";
             // Deliberately OUTSIDE #messageScroll, as a fixed sibling — see the
             // #replyBox/#messageScroll CSS comment above.
-            html += "<div id='replyBox'>" +
-                "<input id='replySubject' placeholder='Subject' value='Re: " + escapeHtml(msg.Subject) + "' />" +
-                "<textarea id='replyBody' placeholder='Message' rows='4'></textarea>" +
-                "<div class='err' id='replyError'></div>" +
-                "<button class='primary' onclick='sendReply()'>Send Reply</button> " +
-                "<button class='secondary' onclick='archiveCurrent()'>Archive</button>" +
-                "</div>";
+            if (isRecipient) {
+                html += "<div id='replyBox'>" +
+                    "<input id='replySubject' placeholder='Subject' value='Re: " + escapeHtml(msg.Subject) + "' />" +
+                    "<textarea id='replyBody' placeholder='Message' rows='4'></textarea>" +
+                    "<div class='err' id='replyError'></div>" +
+                    "<button class='primary' onclick='sendReply()'>Send Reply</button> " +
+                    "<button class='secondary' onclick='archiveCurrent()'>" + (currentArchived ? "Move to Inbox" : "Archive") + "</button>" +
+                    "</div>";
+            }
             pane.innerHTML = html;
 
             var itemsArea = document.getElementById("itemsArea");
             items.forEach(function (item) {
                 var card = document.createElement("div");
                 card.className = "itemCard";
-                if (item.ItemType === "IAFormRecord") {
+                if (!isRecipient) {
+                    card.innerHTML = "<strong>" + escapeHtml(item.ItemLabel || item.ItemType) + "</strong>" +
+                        "<p class='hint'>Attached to this message. Open it from the message you received, or in CMSNEO.</p>";
+                    itemsArea.appendChild(card);
+                } else if (item.ItemType === "IAFormRecord") {
                     // Full CMSNEO field-edit/read-only parity, not a flat read-only
                     // table — rendered by CMSNEO's own ported InteractiveForm.js
                     // inside ia-viewer.html, running against this app's own gated
@@ -354,12 +411,26 @@
                 .catch(function () { errDiv.innerText = "Could not send reply."; });
         }
 
+        // Toggles: Archive from the Inbox, Move to Inbox from the Archived folder
+        // (the button label is set from the message's own IsArchived in renderMessage).
+        // On success the message leaves the current list, so close it and refresh.
         function archiveCurrent() {
+            var errDiv = document.getElementById("replyError");
             api("/inbox/" + currentMessageId + "/archive", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ Archived: true })
-            }).then(function () { loadInbox(); });
+                body: JSON.stringify({ Archived: !currentArchived })
+            })
+                .then(function (r) {
+                    if (r.status === 401) { logout(); throw new Error("unauthorized"); }
+                    if (!r.ok) throw new Error("failed");
+                    currentMessageId = null;
+                    document.getElementById("messagePane").innerHTML = EMPTY_PANE_HTML;
+                    loadInbox();
+                })
+                .catch(function (ex) {
+                    if (ex.message !== "unauthorized" && errDiv) errDiv.innerText = "Could not update this message.";
+                });
         }
 
         function escapeHtml(s) {
