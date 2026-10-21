@@ -7,6 +7,7 @@ using System.Net.Http;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
@@ -30,10 +31,12 @@ namespace CMSMailbox.Controllers
     public class IaViewerController : MailboxControllerBase
     {
         private readonly IHttpClientFactory _httpClientFactory;
+        private readonly ILogger<IaViewerController> _logger;
 
-        public IaViewerController(IHttpClientFactory httpClientFactory)
+        public IaViewerController(IHttpClientFactory httpClientFactory, ILogger<IaViewerController> logger)
         {
             _httpClientFactory = httpClientFactory;
+            _logger = logger;
         }
 
         // Read-only IA actions the ported InteractiveForm.js's ViewDisp() render path
@@ -235,21 +238,19 @@ namespace CMSMailbox.Controllers
         public async Task<IActionResult> GetIAPDF(int MainID, string filename, string token = "")
         {
             int uid = ResolveOneOffUid(token);
-            if (uid == 0) return NotFound();
+            if (uid == 0) return ProxyNotFound("GetIAPDF", "one-off token did not resolve to a user");
 
             string formId = LookupFormIdForMainId(uid, MainID);
-            if (formId == null || !PassesGates(uid, MainID, formId))
-            {
-                return NotFound();
-            }
+            if (formId == null) return ProxyNotFound("GetIAPDF", "no MBX_MessageItem found for this MainID and user");
+            if (!PassesGates(uid, MainID, formId)) return ProxyNotFound("GetIAPDF", "access gates failed");
 
-            if (string.IsNullOrEmpty(DB.CmsUrl)) return NotFound();
+            if (string.IsNullOrEmpty(DB.CmsUrl)) return ProxyNotFound("GetIAPDF", "AppSettings:CmsUrl is not set");
 
             // Mint a fresh one-off token for the outbound call rather than forwarding
             // the client-supplied one, in case NEO_GetUserToken tokens are single-use.
             var mint = DB.GetDB("exec NEO_GetUserToken @uid", uid);
             string freshToken = (mint.Rows.Count > 0 && mint.Columns.Contains("Token")) ? mint.Rows[0]["Token"].ToString() : null;
-            if (string.IsNullOrEmpty(freshToken)) return NotFound();
+            if (string.IsNullOrEmpty(freshToken)) return ProxyNotFound("GetIAPDF", "NEO_GetUserToken returned no token");
 
             var client = _httpClientFactory.CreateClient("CmsProxy");
             string url = DB.CmsUrl.TrimEnd('/') + "/GetIAPDF?MainID=" + MainID +
@@ -258,12 +259,29 @@ namespace CMSMailbox.Controllers
 
             HttpResponseMessage resp;
             try { resp = await client.GetAsync(url); }
-            catch { return NotFound(); }
+            catch (Exception ex) { return ProxyNotFound("GetIAPDF", "request to CMSNEO threw " + DescribeException(ex)); }
 
-            if (!resp.IsSuccessStatusCode) return NotFound();
+            if (!resp.IsSuccessStatusCode) return ProxyNotFound("GetIAPDF", "CMSNEO responded " + (int)resp.StatusCode);
 
             var bytes = await resp.Content.ReadAsByteArrayAsync();
             return File(bytes, "application/pdf");
+        }
+
+        // These two proxy routes used to return a bare 404 for every failure, which made
+        // "which step failed" impossible to tell apart (bad token vs. gate vs. CmsUrl
+        // vs. CMSNEO itself). The client still gets the same indistinguishable 404 —
+        // only the server log gets the reason. Never log the token or the outbound URL.
+        private IActionResult ProxyNotFound(string route, string reason)
+        {
+            _logger.LogWarning("{Route} -> 404: {Reason}", route, reason);
+            return NotFound();
+        }
+
+        private static string DescribeException(Exception ex)
+        {
+            var inner = ex;
+            while (inner.InnerException != null) inner = inner.InnerException;
+            return ex.GetType().Name + (inner != ex ? " / " + inner.GetType().Name : "") + ": " + inner.Message;
         }
 
         // Proxies CMSNEO's own attachment viewer/download route the same way
@@ -276,16 +294,16 @@ namespace CMSMailbox.Controllers
         public async Task<IActionResult> DownloadIA(string fid, int dl, string token, int messageItemId)
         {
             int uid = ResolveOneOffUid(token);
-            if (uid == 0) return NotFound();
+            if (uid == 0) return ProxyNotFound("DownloadIA", "one-off token did not resolve to a user");
 
             var ctx = ResolveAndGateByMessageItem(messageItemId, uid);
-            if (ctx == null) return NotFound();
+            if (ctx == null) return ProxyNotFound("DownloadIA", "access gates failed for this messageItemId");
 
-            if (string.IsNullOrEmpty(DB.CmsUrl)) return NotFound();
+            if (string.IsNullOrEmpty(DB.CmsUrl)) return ProxyNotFound("DownloadIA", "AppSettings:CmsUrl is not set");
 
             var mint = DB.GetDB("exec NEO_GetUserToken @uid", uid);
             string freshToken = (mint.Rows.Count > 0 && mint.Columns.Contains("Token")) ? mint.Rows[0]["Token"].ToString() : null;
-            if (string.IsNullOrEmpty(freshToken)) return NotFound();
+            if (string.IsNullOrEmpty(freshToken)) return ProxyNotFound("DownloadIA", "NEO_GetUserToken returned no token");
 
             var client = _httpClientFactory.CreateClient("CmsProxy");
             string url = DB.CmsUrl.TrimEnd('/') + "/DownloadIA?fid=" + Uri.EscapeDataString(fid ?? "") +
@@ -293,9 +311,9 @@ namespace CMSMailbox.Controllers
 
             HttpResponseMessage resp;
             try { resp = await client.GetAsync(url); }
-            catch { return NotFound(); }
+            catch (Exception ex) { return ProxyNotFound("DownloadIA", "request to CMSNEO threw " + DescribeException(ex)); }
 
-            if (!resp.IsSuccessStatusCode) return NotFound();
+            if (!resp.IsSuccessStatusCode) return ProxyNotFound("DownloadIA", "CMSNEO responded " + (int)resp.StatusCode);
 
             var bytes = await resp.Content.ReadAsByteArrayAsync();
             string contentType = resp.Content.Headers.ContentType?.ToString() ?? "application/octet-stream";
