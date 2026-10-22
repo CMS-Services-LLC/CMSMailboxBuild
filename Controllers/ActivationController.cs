@@ -40,7 +40,10 @@ namespace CMSMailbox.Controllers
             var link = hash == null ? null : OpenLink(hash);
             if (link == null) return Ok(new { status = "invalid" });
 
-            var setup = new TwoFactorAuthenticator().GenerateSetupCode(
+            // sql/017: the email may already have an authenticator (set up through another account with
+            // the same email). Then the page asks for a code from it and never shows that secret again.
+            bool hasAuthenticator = link["HasAuthenticator"]?.ToString() == "True";
+            SetupCode setup = hasAuthenticator ? null : new TwoFactorAuthenticator().GenerateSetupCode(
                 "CMS Secure Email", link["Email"].ToString(), link["MfaToken"] + DB.GmfaKey, false, 4);
 
             return Ok(new
@@ -48,8 +51,9 @@ namespace CMSMailbox.Controllers
                 status = "ok",
                 firstName = link["FirstName"]?.ToString() ?? "",
                 username = link["UserName"]?.ToString() ?? "",
-                barcodeUrl = setup.QrCodeSetupImageUrl,
-                manualKey = setup.ManualEntryKey
+                hasAuthenticator,
+                barcodeUrl = setup?.QrCodeSetupImageUrl,
+                manualKey = setup?.ManualEntryKey
             });
         }
 

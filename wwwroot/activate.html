@@ -68,7 +68,11 @@
         <!-- Step 2: authenticator -->
         <div id="stepTotp" class="hidden">
             <div class="steps">Step 2 of 3</div>
-            <h2>Set up two-factor authentication</h2>
+            <h2 id="totpTitle">Set up two-factor authentication</h2>
+            <div id="totpExisting" class="hidden">
+                <p class="sub">Your email address already has an authenticator set up for CMS. Open your authenticator app and enter the current 6-digit code from your CMS entry to confirm it's you.</p>
+            </div>
+            <div id="totpNew">
             <ol class="howto">
                 <li>Install an authenticator app on your phone if you don't already have one (Google Authenticator, Microsoft Authenticator, Authy, or 1Password all work).</li>
                 <li>Open the app and choose "Add account" or "Scan QR code".</li>
@@ -79,6 +83,7 @@
             <img id="qr" alt="QR code for your authenticator app" />
             <p class="sub" style="margin:8px 0 4px">If you cannot scan the QR code, you can enter this key manually:</p>
             <div class="key" id="manualKey"></div>
+            </div>
             <label for="code">6-digit code</label>
             <input id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" onkeyup="if (event.key === 'Enter') complete()" />
             <div class="error" id="codeError"></div>
@@ -92,7 +97,8 @@
             <h2>Save your backup codes</h2>
             <p class="sub">Your account is active. If you lose your phone, each of these codes can be used <b>once</b> in place of an authenticator code.</p>
             <div class="codes" id="codes"></div>
-            <div class="warn">These codes are shown only this one time. Store them somewhere safe, not in the same place as your password.</div>
+            <div class="warn">These codes are shown only this one time. Store them somewhere safe, not in the same place as your password.
+                <span id="codesReplace" class="hidden"><br>They replace any backup codes you were given before for this email address.</span></div>
             <div class="row">
                 <button class="secondary" onclick="copyCodes()">Copy</button>
                 <button class="secondary" onclick="downloadCodes()">Download</button>
@@ -209,8 +215,15 @@
                     if (res.status !== "ok") { show("stepInvalid"); return; }
                     document.getElementById("hello").innerText = "Welcome, " + (res.firstName || "there");
                     document.getElementById("username").innerText = res.username;
-                    document.getElementById("qr").src = res.barcodeUrl;
-                    document.getElementById("manualKey").innerText = res.manualKey;
+                    if (res.hasAuthenticator) {
+                        document.getElementById("totpTitle").innerText = "Confirm with your authenticator app";
+                        document.getElementById("totpExisting").classList.remove("hidden");
+                        document.getElementById("totpNew").classList.add("hidden");
+                        document.getElementById("codesReplace").classList.remove("hidden");
+                    } else {
+                        document.getElementById("qr").src = res.barcodeUrl;
+                        document.getElementById("manualKey").innerText = res.manualKey;
+                    }
                     show("stepPassword");
                     document.getElementById("pwd").focus();
                 })
