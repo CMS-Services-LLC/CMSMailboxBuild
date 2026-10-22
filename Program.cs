@@ -24,6 +24,7 @@ namespace CMSMailbox
             DB.JWT_Key = config["AppSettings:JwtSigningKey"];
             DB.GmfaKey = config["AppSettings:GmfaKey"]; // must match the corresponding CMS environment's value
             DB.CmsUrl = config["AppSettings:CmsUrl"];
+            DB.Remove2FAForTesting = string.Equals(config["AppSettings:Remove2FAForTesting"], "true", System.StringComparison.OrdinalIgnoreCase);
 
             CreateHostBuilder(args).Build().Run();
         }

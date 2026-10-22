@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Secure Exam Viewer</title>
+<link rel="stylesheet" href="css/site.css" asp-append-version="true" />
+<style>
+  /* Same page-shell fixes as ia-viewer.html (see its comments): white background,
+     this document's own body is the scroll container, popups anchored to the frame. */
+  /* Layout: the frame never scrolls as a whole. The exam's header (name, section,
+     Document Request, ...) stays put and only the question list (#availExamsInner)
+     scrolls, filling whatever height the frame has — like the exam on CMSNEO's
+     Documents page, but sized to the frame instead of the window. */
+  html, body { margin: 0; padding: 0; background-color: #fff; height: 100%; overflow: hidden; }
+  body { display: flex; flex-direction: column; }
+  body > #mbxDeniedBanner, body > #mbxLoadingBanner, body > #mbxReadOnlyBanner { flex: 0 0 auto; }
+  #mbxDeniedBanner { display:none; padding: 24px; font-family: sans-serif; color: #444; }
+  #mbxLoadingBanner { padding: 24px; text-align: center; font-family: sans-serif; color: #444; }
+  #mbxReadOnlyBanner { display:none; padding: 8px 12px; margin: 6px 0; background: #e6f4ea; color: #1e6b34; font-family: sans-serif; font-size: 13px; }
+  #PageContainer { flex: 1 1 auto; min-height: 0; height: auto !important; overflow: hidden !important; }
+  #ContentWindow { height: 100%; box-sizing: border-box; padding: 8px 12px; display: flex; flex-direction: column; }
+  #ContentWindow > * { flex: 0 0 auto; }
+  /* viewMgtExam gives this a fixed (document.body.scrollHeight - 320)px — the whole
+     window on CMSNEO's page, only ~230px in this iframe. Fill the remaining space
+     instead, with the one scrollbar. */
+  #ContentWindow > #availExamsInner { flex: 1 1 auto; min-height: 0; height: auto !important; overflow-y: auto !important; }
+  .fileViewer, .PopUp { position: fixed !important; }
+
+  /* Out of scope for the mailbox (WizardAssignments_Plan.md Phase 3): the examined
+     company answers questions and supplies document requests here; everything else
+     stays in CMSNEO. managementExamsNEW.js is copied UNCHANGED, so these are hidden
+     here rather than edited out of it. */
+  #ExamHeader a,                                   /* "< Back to Exams Selection" */
+  label[onclick*="PDF Preview"],                   /* Print to PDF */
+  label[onclick^="GetZipFile"],                    /* Exam Zip Options */
+  label[onclick^="showExamSnapshots"],             /* Snapshots */
+  label[onclick^="generateJSReport"],              /* Heatmap Report */
+  #sectExamSharing { display: none !important; }
+
+  /* View-only once the task is Completed (the server refuses writes then too). */
+  body.mbx-readonly .ocInput { pointer-events: none; background: #f4f4f4; }
+  body.mbx-readonly .plusBtn,
+  body.mbx-readonly .redlink { display: none !important; }
+</style>
+</head>
+<body>
+  <!--
+    Two views, chosen server-side (IaViewerController.Exam.cs, sql/020): the task's
+    assignee gets the examined company's own view; the task's assigner (opening it
+    from Sent or from a reply) gets the management view, with scoring and audit layers.
+
+    Hosts CMSNEO's own exam viewer (managementExamsNEW.js, copied byte-for-byte; to
+    re-sync after an exam change in CMS, copy it again: nothing in it is patched).
+    This page stands up the globals CMS's Documents page normally provides, opens the
+    exam the way the examined company opens its own exam there
+    (viewMgtExam(ExamID, 0, myCompany), as complianceExams.js does), and replaces a
+    few functions that only make sense inside CMSNEO (see the script below).
+
+    Every request is re-checked server-side against this task and the assignee's own
+    access — see IaViewerController.Exam.cs. Loading this page grants nothing.
+  -->
+  <div id="mbxDeniedBanner">This exam isn't available to you, or it could not be loaded.</div>
+  <div id="mbxLoadingBanner"><img src="loading.gif" width="32" height="32" /><div>Please wait while the exam is loading...</div></div>
+  <div id="mbxReadOnlyBanner">This exam task is completed. You can view it, but no more changes can be made here.</div>
+
+  <div id="PageContainer" style="position:relative;"><div id="ContentWindow"></div></div>
+  <div id="loading" style="display:none;"></div>
+  <input type="hidden" id="csrfToken" value="mbx" />
+
+  <!-- Page-shell elements global.js / options.js expect (same set as ia-viewer.html). -->
+  <div class="confirmWindow" id="confirmWindow" style="z-index:2700; display:none"></div>
+  <div id="confirmWindow2" class="confirmWindow" style="display:none"></div>
+  <div id="extras" style="z-index:2700; display:none"></div>
+  <div class="optWindow" id="optWindow" style="z-index:2500; display:none"></div>
+  <div id="popoutWindow" style="z-index:2500; display:none"></div>
+  <input type="file" id="bulkUploadFile" style="position:absolute; z-index:2500; display:none" />
+  <input type="file" id="bulkUploadAttachments" style="position:absolute; z-index:2500; display:none" multiple />
+
+  <script src="js/jquery.min.js" asp-append-version="true"></script>
+  <script src="js/bootstrap.bundle.min.js" asp-append-version="true"></script>
+  <script src="js/FileViewer.js" asp-append-version="true"></script>
+  <script src="js/ajax.js" asp-append-version="true"></script>
+  <script src="js/Draggable.js" asp-append-version="true"></script>
+  <script src="js/newOpts.js" asp-append-version="true"></script>
+  <script src="js/gchartTables.js" asp-append-version="true"></script>
+  <script src="js/global.js" asp-append-version="true"></script>
+  <script src="js/options.js" asp-append-version="true"></script>
+  <script src="js/managementExamsNEW.js" asp-append-version="true"></script>
+
+  <script>
+    // The Documents page's own switch between "my company's exam" (0) and the
+    // management view of a downstream company (1) — declared in CMSNEO's
+    // complianceNewExplorer.js, which this page doesn't load.
+    var byFolderCompany = 0;
+    var mbxExamCanWrite = true;
+    var mbxExamRole = "";   // "Assignee" | "Assigner" (server-decided, sql/020)
+
+    // The management view asks isDownstream(xcid) (global.js), which reads CMSNEO's
+    // access-tree tier data this page doesn't load. The server has already checked
+    // that the assigner's company tree reaches the examined company (MBX_GetExamAccess),
+    // so answer from that.
+    function isDownstream(xCID) { return mbxExamRole === "Assigner"; }
+
+    // Clicks inside this frame reset the mailbox's idle timeout (see index.html).
+    document.addEventListener("click", function () {
+      if (window.parent && window.parent !== window) window.parent.postMessage({ mbxActivity: true }, window.location.origin);
+    }, true);
+
+    // ---- CMSNEO-only behavior, replaced for the mailbox --------------------------
+    // Lists the user's CMS files for "attach from CMS" — not offered here.
+    function ftnGetCMSFiles(xCID, func) { if (func) func(); }
+    // Refreshes CMSNEO's file explorer after an upload — there is none here.
+    function refreshOFiles() { }
+    // "< Back to Exams Selection" (hidden by CSS) — nothing to go back to.
+    function buildAvailExams() { }
+
+    // Document request "+": CMSNEO asks "From PC" or "From CMS". The mailbox only
+    // uploads from the PC, as the caller themself (xUID 0), so go straight to the
+    // file picker — then the same MGTUploadDocsGO CMSNEO uses.
+    function MGTUploadDocs(xCID, ExamID, LineID, DocReqID) {
+      if (!mbxExamCanWrite) return;
+      try { inputMGTUpload.parentElement.removeChild(inputMGTUpload); } catch (e) { }
+      xsection(PageContainer, [
+        "input|type=file|id=inputMGTUpload|multiple=true|style=display:none|onchange=MGTUploadDocsGO(" + xCID + ",0,'" + ExamID + "','" + LineID + "','" + DocReqID + "')"
+      ]);
+      inputMGTUpload.click();
+    }
+
+    // Show the remove "x" only on the user's own uploads (the server refuses the
+    // rest anyway — IaViewerController.Exam.cs).
+    var mbxOrigPopDocs = MGTPopDocs;
+    MGTPopDocs = function () {
+      mbxOrigPopDocs();
+      (jsMgtDocs || []).forEach(function (dr) {
+        if (dr.FID == null || dr.LoadedByUID == myUID) return;
+        var row = document.getElementById("docReq_" + dr.FID);
+        var x = row && row.querySelector(".redlink");
+        if (x) x.style.display = "none";
+      });
+    };
+
+    // Opening a document: served by the mailbox itself (exam/{item}/doc/{fid}) with
+    // this app's own login, instead of CMSNEO's DownloadExamFile route. A row's
+    // onclick passes LinkedFID when the file was attached from CMS, so map back to
+    // the exam document's own FID first.
+    function reportLoadFiles(fid, filename) {
+      var dr = (jsMgtDocs || []).filter(function (d) { return d.FID == fid || d.LinkedFID == fid; })[0];
+      var docFid = dr ? dr.FID : fid;
+      fetch("exam/" + MBX_CurrentMessageItemId + "/doc/" + docFid, {
+        headers: { "Authorization": "Bearer " + sessionStorage.getItem("mbxToken") }
+      }).then(function (r) {
+        if (!r.ok) throw new Error("denied");
+        var disp = r.headers.get("Content-Disposition") || "";
+        return r.blob().then(function (b) { return { blob: b, download: /attachment/i.test(disp) }; });
+      }).then(function (f) {
+        var url = URL.createObjectURL(f.blob);
+        if (f.download) {
+          var a = document.createElement("a");
+          a.href = url; a.download = filename || "document";
+          document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        } else {
+          window.open(url, "_blank");
+        }
+        setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+      }).catch(function () { xconfirm("This document couldn't be opened."); });
+    }
+
+    // ---- Bootstrap ------------------------------------------------------------------
+    (function () {
+      var realToken = sessionStorage.getItem("mbxToken");
+      var deny = function (msg) {
+        document.getElementById("mbxLoadingBanner").style.display = "none";
+        var b = document.getElementById("mbxDeniedBanner");
+        if (msg) b.textContent = msg;
+        b.style.display = "block";
+      };
+      if (!realToken) { deny("You must be logged in to view this exam."); return; }
+      // ajax.js reads this key on every request.
+      sessionStorage.setItem("UserToken", realToken);
+
+      var messageItemId = parseInt(new URLSearchParams(window.location.search).get("messageItemId"), 10);
+      if (!messageItemId) { deny(); return; }
+      // Read by the patched newFormData() in js/global.js — every call is scoped to this item.
+      window.MBX_CurrentMessageItemId = messageItemId;
+
+      fetch("exam/" + messageItemId + "/bootstrap", { headers: { "Authorization": "Bearer " + realToken } })
+        .then(function (r) { if (!r.ok) throw new Error("bootstrap failed"); return r.json(); })
+        .then(function (ctx) {
+          myCID = ctx.myCID;
+          myUID = ctx.myUID;
+          myCompany = ctx.myCompany || "";
+          GlobalFName = ctx.fName || "";
+          GlobalLName = ctx.lName || "";
+          ME = { Security: jparse(ctx.security) };
+          jsUserParts = [];
+          mbxExamCanWrite = !!ctx.canWrite;
+          mbxExamRole = ctx.role || "";
+          if (!mbxExamCanWrite) {
+            document.body.classList.add("mbx-readonly");
+            document.getElementById("mbxReadOnlyBanner").style.display = "block";
+          }
+          document.getElementById("mbxLoadingBanner").style.display = "none";
+          if (mbxExamRole === "Assigner") {
+            // The management view of a downstream company's exam — exactly how CMSNEO's
+            // Documents page opens it (scoring and audit layers included).
+            byFolderCompany = 1;
+            viewMgtExam(ctx.examId, ctx.examCID, ctx.examCompany);
+          } else {
+            // Exactly how the examined company opens its own exam in CMSNEO.
+            viewMgtExam(ctx.examId, 0, myCompany);
+          }
+        })
+        .catch(function (err) { console.log("exam-viewer bootstrap error", err); deny(); });
+    })();
+  </script>
+</body>
+</html>

@@ -213,6 +213,13 @@
                 .then(function (r) { return r.json(); })
                 .then(function (res) {
                     document.getElementById("loginLoadingBanner").style.display = "none";
+                    // Local testing with 2FA switched off (AuthController, Development only).
+                    if (res.status === "ok" && res.token) {
+                        token = res.token;
+                        sessionStorage.setItem("mbxToken", token);
+                        showApp();
+                        return;
+                    }
                     if (res.status === "mfa_required") {
                         pendingToken = res.pendingToken;
                         document.getElementById("passcode").value = "";
@@ -493,6 +500,7 @@
                     var items = JSON.parse(res.items);
                     renderMessage(msg, items);
                     loadDRViewers();
+                    fitExamFrames();
                     loadInbox(); // refresh read/unread state
                 })
                 .catch(function () {
@@ -572,6 +580,17 @@
                         "style='width:100%;height:450px;border:1px solid #ccc;margin-top:8px;display:block' " +
                         "title='" + escapeHtml(item.ItemLabel || "Form Application Record") + "'></iframe>";
                     itemsArea.appendChild(card);
+                } else if (item.ItemType === "ExamTask") {
+                    // Exam task (sql/019): CMSNEO's own exam viewer, ported into
+                    // exam-viewer.html and gated by IaViewerController.Exam.cs.
+                    card.setAttribute("data-task-status", item.TaskStatus || "");
+                    card.innerHTML = taskBanner(item) + examFrameHtml(item, item.IsMyTask);
+                    itemsArea.appendChild(card);
+                } else if (item.ItemType === "ExamRef") {
+                    // A reply's copy of an exam task (sql/020): the same exam, opened
+                    // in the assignee's or the assigner's view (decided server-side).
+                    card.innerHTML = originBannerHtml(item) + reviewBarHtml(item) + examFrameHtml(item, true);
+                    itemsArea.appendChild(card);
                 } else if (item.ItemType === "DRTask") {
                     // Dynamic Report task (sql/008) — see drCardHtml().
                     card.setAttribute("data-task-status", item.TaskStatus || "");
@@ -601,10 +620,11 @@
                 html += "<p class='hint'>The assignee has finished this task. Check it in CMSNEO, then mark it completed.</p>" +
                     "<button class='primary' id='reviewBtn_" + item.MessageItemID + "' onclick='reviewTask(" + item.MessageItemID + ")'>Mark as Completed</button>" +
                     "<div class='err' id='reviewMsg_" + item.MessageItemID + "'></div>";
-            } else if (!isOpenableReport(item)) {
+            } else if (!isOpenableReport(item) && item.ItemType !== "ExamTask" && item.ItemType !== "ExamRef") {
                 html += "<p class='hint'>Attached to this message. Open it from the message you received, or in CMSNEO.</p>";
             }
             if (isOpenableReport(item)) html += drViewerHtml(item.MessageItemID);
+            if (item.ItemType === "ExamTask" || item.ItemType === "ExamRef") html += examFrameHtml(item, true, true);
             return html;
         }
 
@@ -616,7 +636,7 @@
             var st = item.OriginTaskStatus;
             var done = st === "Completed", pending = st === "Pending Review";
             var label = { Saved: "Saved - waiting for Save for Use" }[st] || st;
-            var what = { FormApplication: "Form Application task", DynamicReport: "Dynamic Report task" }[item.OriginTaskType] || "Task";
+            var what = { FormApplication: "Form Application task", DynamicReport: "Dynamic Report task", Exam: "Exam task" }[item.OriginTaskType] || "Task";
             var due = (item.OriginDueDate && !done) ? " &middot; Due " + escapeHtml(String(item.OriginDueDate).substring(0, 10)) : "";
             return "<div class='taskBanner' style='padding:6px 10px;margin-bottom:8px;border-radius:3px;" +
                 (done ? "background:#e6f4ea;color:#1e6b34" : pending ? "background:#e8f0fe;color:#1a4a9c" : "background:#fff4e0;color:#8a5300") + "'>" +
@@ -730,6 +750,7 @@
                         if (banner) banner.outerHTML = taskBanner(item);
                     });
                     loadDRViewers();
+                    fitExamFrames(); // a re-rendered card's exam frame starts at its default height
                 })
                 .catch(function () { /* the cards just keep their previous status */ });
         }
@@ -743,7 +764,8 @@
             var pending = item.TaskStatus === "Pending Review";
             var what = {
                 FormApplication: "Fill out this form and click Save for Use",
-                DynamicReport: "Fill in the Excel template and upload it"
+                DynamicReport: "Fill in the Excel template and upload it",
+                Exam: "Answer the exam questions and supply the requested documents"
             }[item.TaskType] || "Task";
             var statusText = {
                 Completed: "Completed",
@@ -763,6 +785,50 @@
         // A completed report: its rows in a table; clicking a row opens a panel with
         // its values (editable when it's your own company's row, read-only otherwise),
         // notes, and attachments. Every request is access-checked server-side.
+
+        // An exam frame takes exactly the space left in the message pane below it
+        // (above the reply box), so the message itself doesn't scroll and push its
+        // header off-screen — the exam's own question list scrolls instead. Never
+        // smaller than MIN_EXAM_FRAME; re-fitted when the window is resized.
+        var MIN_EXAM_FRAME = 320;
+        function fitExamFrames() {
+            var pane = document.getElementById("messagePane");
+            var scroller = document.getElementById("messageScroll");
+            var reply = document.getElementById("replyBox");
+            if (!pane || !scroller) return;
+            var frames = Array.prototype.filter.call(
+                document.querySelectorAll("#messageScroll iframe.mbx-exam-frame"),
+                function (f) { return !f.classList.contains("mbx-iframe-fullscreen"); });
+            if (frames.length === 0) return;
+            // The height #messageScroll can have without scrolling.
+            var room = pane.clientHeight - (reply ? reply.offsetHeight : 0);
+            // First pass: give the (last) exam frame everything below its top edge.
+            var frame = frames[frames.length - 1];
+            var top = frame.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+            frame.style.height = Math.max(MIN_EXAM_FRAME, Math.floor(room - top)) + "px";
+            // Second pass: whatever still overflows (the frame's border, the card's
+            // padding and margin below it, ...) is measured, not guessed, and trimmed.
+            var over = scroller.scrollHeight - room;
+            if (over > 0) frame.style.height = Math.max(MIN_EXAM_FRAME, frame.offsetHeight - over - 2) + "px";
+        }
+        window.addEventListener("resize", fitExamFrames);
+
+        // An exam in its frame (exam-viewer.html). Which view it opens in — the
+        // assignee's or the assigner's management view — is decided server-side
+        // (IaViewerController.Exam.cs); withFrame false shows just the label.
+        // noHeader leaves out the label row when the caller already printed it.
+        function examFrameHtml(item, withFrame, noHeader) {
+            var label = escapeHtml(item.ItemLabel || "Exam");
+            var html = noHeader ? "" :
+                "<div class='mbx-item-header' style='display:flex;justify-content:space-between;align-items:center'>" +
+                "<strong>" + label + "</strong>" +
+                (withFrame ? "<button class='secondary' onclick='mbxEnterFullscreen(this)'>View Fullscreen</button>" : "") +
+                "</div>";
+            if (!withFrame) return html + "<p class='hint'>This task is assigned to someone else.</p>";
+            if (noHeader) html += "<div style='text-align:right'><button class='secondary' onclick='mbxEnterFullscreen(this)'>View Fullscreen</button></div>";
+            return html + "<iframe class='mbx-exam-frame' src='exam-viewer.html?messageItemId=" + item.MessageItemID + "' " +
+                "style='width:100%;height:550px;border:1px solid #ccc;margin-top:8px;display:block' title='" + label + "'></iframe>";
+        }
 
         function isOpenableReport(item) {
             return (item.ItemType === "DRTask" || item.ItemType === "DynamicReport") && item.ItemID && item.ItemID !== "0";

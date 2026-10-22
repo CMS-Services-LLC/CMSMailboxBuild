@@ -22,6 +22,13 @@ namespace CMSMailbox.Controllers
     [Route("auth")]
     public class AuthController : Controller
     {
+        private readonly Microsoft.AspNetCore.Hosting.IWebHostEnvironment _env;
+
+        public AuthController(Microsoft.AspNetCore.Hosting.IWebHostEnvironment env)
+        {
+            _env = env;
+        }
+
         [HttpPost("login")]
         public IActionResult Login([FromBody] LoginRequest req)
         {
@@ -61,6 +68,14 @@ namespace CMSMailbox.Controllers
 
             string strUID = dat.Rows[0]["uid"].ToString();
             string email = dat.Rows[0]["email"].ToString();
+
+            // Local testing only (see DB.Remove2FAForTesting): the password check above
+            // still runs; only the 2FA step is skipped. Never in Azure (Production).
+            if (DB.Remove2FAForTesting && Microsoft.Extensions.Hosting.HostEnvironmentEnvExtensions.IsDevelopment(_env))
+            {
+                return Ok(new { status = "ok", token = new TokenGenerator().GenerateToken(strUID) });
+            }
+
             string mfaToken = dat.Rows[0]["mfaToken"].ToString();
             string useMfaToken = dat.Rows[0]["useMfaToken"].ToString();
 

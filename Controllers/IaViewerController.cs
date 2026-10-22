@@ -28,7 +28,7 @@ namespace CMSMailbox.Controllers
     //           (the real, confirmed-working per-record ACS check).
     // This repeats on every call, not just once at page load, so a recipient who loses
     // access mid-session is cut off on their very next request, not just their next login.
-    public class IaViewerController : MailboxControllerBase
+    public partial class IaViewerController : MailboxControllerBase
     {
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly ILogger<IaViewerController> _logger;
@@ -180,6 +180,10 @@ namespace CMSMailbox.Controllers
             int uid = CurrentUID();
             if (uid == 0) return Content("[]");
 
+            // The exam viewer's ported scripts post here too (same relative URL) —
+            // ExamTask items are handled entirely by IaViewerController.Exam.cs.
+            if (IsExamItem(messageItemId)) return ExamAdHoc(action, strjson, messageItemId, uid);
+
             var ctx = ResolveAndGateByMessageItem(messageItemId, uid);
             if (ctx == null) return Content("[]");
 
@@ -305,6 +309,8 @@ namespace CMSMailbox.Controllers
         {
             int uid = CurrentUID();
             if (uid == 0) return Content("[]");
+
+            if (IsExamItem(messageItemId)) return ExamAdHocAttach(action, strjson, messageItemId, uid);
 
             var ctx = ResolveAndGateByMessageItem(messageItemId, uid);
             if (ctx == null) return Content("[]");

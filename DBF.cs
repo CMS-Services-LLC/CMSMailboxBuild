@@ -16,6 +16,11 @@ namespace CMSMailbox
         public static string Environment;
         public static string JWT_Key;
         public static string GmfaKey; // must match the corresponding CMS environment's value exactly
+        // Local testing only: skip the 2FA step at login. Honored ONLY when the app runs
+        // in Development (AuthController checks IWebHostEnvironment), so it can never
+        // take effect on Azure. Set AppSettings:Remove2FAForTesting=true in the local,
+        // gitignored appsettings.json.
+        public static bool Remove2FAForTesting;
         public static string CmsUrl; // base URL of the CMSNEO app for this environment — used only to proxy byte-serving routes (GetIAPDF/DownloadIA) that CMSMailbox doesn't reimplement
 
         public static DataTable GetDB(string sql, int UID, string strParams = "", bool errPass = false, string cs = "", string timeout = "10")

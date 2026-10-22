@@ -59,6 +59,65 @@ From the CMSNEO dashboard, a management-company user opens a window from "What w
 - The mailbox **Send Reply** button is disabled until the reply has text.
 - **Mailbox alerts in CMS + one-time handoff** (sql/011, 012). `NEO_GetMyAlerts3` (CMS's own procedure behind Items Alerted On and the dashboard alert banner) now also lists the caller's mailbox messages, as Type "Secure Mailbox". Unread ones are under Not Viewed; once read they move to Viewed, with ViewedBy = [reader]. These are matched by email, so a management user switched into a downstream company still sees them. Clicking one calls CMS `main/MailboxHandoff`, which issues a **one-time code**: 256-bit random, valid 60 seconds, usable once, stored in `MBX_HandoffCode`. It opens the mailbox in a new tab with `?handoff=<code>`. The mailbox's `auth/handoff` exchanges the code for its normal login and strips it from the address bar, and the page sets `Referrer-Policy: no-referrer`. Nothing is bypassed: the mailbox login is the same NEO_Login + 2FA check the user already passed in CMS. Removing a mailbox alert uses MainID = -(1000000000 + MessageID), because `NEO_RemovedAlertedItems` is matched on MainID alone elsewhere. **Reusing the tab:** CMS always opens the mailbox in a tab named `cmsMailbox`. If that tab is already open, CMS posts the new code to it with `postMessage`, addressed to the mailbox's origin only. The mailbox accepts it only from CMS's origin (`auth/cms-origin`, taken from `CmsUrl`) and switches message in place. If the tab doesn't acknowledge within 1.5 seconds, CMS navigates it to the handoff URL instead.
 
+## Phase 3: Exam tasks (planned 2026-10-22)
+
+**Decisions (John, 2026-10-22):**
+- **Assignee:** the assignee is a user at the **examined company** (`xcid`), working their own company's exam.
+- **In the mailbox they can:** answer questions, and upload, view and remove their own documents for document requests. Scoring, heatmap, reports, snapshots and sharing stay in CMS.
+- **Approach:** **port CMS's viewer** (`managementExamsNEW.js`), the same way the form viewer was ported, with everything outside that scope hidden.
+- **Completion:** an exam is a back-and-forth between the managing company and the assignee, so nothing automatic finishes it. Status goes **Open**, then **Pending** as soon as the assignee begins (first answer or upload), then **Completed** only when the assigner clicks Mark as Completed. This applies whatever the "Require my review" box says.
+
+**Assigning (CMS, `AssignTask.js` Exams tab):**
+- **Picking the exam:** choose a downstream company, then one of the exams shared with it (`_MGTGetExams {xcid}`).
+- **Assignee list:** users of **that** company with the Exams permission, matched by MGT account as elsewhere. New: `MBX_GetExamTaskCandidates`.
+- **Stored on the task:** `MBX_Task` gets `ExamID` and `ExamCID` (both columns already exist). The message item is `ItemType 'ExamTask'`.
+
+**Viewer (CMSMailbox):**
+- **Host page:** `exam-viewer.html` hosts the copied `managementExamsNEW.js`, plus the shell elements it expects (`ContentWindow`, etc.) and the globals seeded by a bootstrap call. The same patches apply as for the form viewer: every call carries `messageItemId`, and the out-of-scope buttons are hidden.
+- **Endpoints:** `ExamViewerController` has `main/adHoc` with a strict allowlist, and `main/adHocAttach` for `_MGTExamUploadDoc` only. Viewing an uploaded document is proxied to CMS's `GetMGTExamDoc` with a one-off token, the same way GetIAPDF is.
+- **Gate on every call:**
+  - an exam task on this item, assigned to the caller,
+  - `AccessTreeDown(caller)` includes the exam's `xcid` (the same rule as exam snapshots; never `mgtCID`),
+  - the exam is shared with that `xcid` (`a_aMgtExamShare`).
+- **Locking each call to the task's exam:**
+  - every proc that takes `examid`/`xcid` has both pinned to the task's,
+  - `_MgtUpdateAnswer`/`_MgtArchiveAnswer` (by `answerID`) need that answer to belong to the task's exam and `xcid`,
+  - `_MgtDeleteFormDoc` (by `fid`) needs the doc to be on the task's exam and `xcid` and uploaded by the caller,
+  - uploads have `xcid`/`xuid`/`examid` forced to the task's and the caller's.
+  
+  These checks matter because the exam write procs (`NEO_MgtUpdateAnswers`, `NEO_MgtUpdateAnswer`, `NEO_MgtDeleteFormDoc`, ...) check nothing themselves.
+- **"Begins":** the first successful answer or upload sets `MBX_Task.ResultID = ExamID` (the started marker), so the derived status shows Pending.
+- **Done:** the assigner's existing Mark as Completed (`MBX_ReviewTask`) completes it. Exam tasks always behave as review-required.
+
+**SQL 019:**
+- the `ExamTask` item type,
+- `MBX_GetExamTaskCandidates`, `MBX_GetExamTask`, `MBX_MarkExamTaskStarted`,
+- `MBX_TaskIsDone` / `MBX_TaskStatusText` extended for exams (Open, then Pending, then Completed).
+
+**As built (2026-10-22, untested; needs sql/019):**
+- **`exam-viewer.html`** hosts `js/managementExamsNEW.js` and `js/options.js`, both copied **unchanged** from CMS.
+  - It opens the exam with `viewMgtExam(ExamID, 0, myCompany)`, exactly as the examined company does on CMS's Documents page, with `byFolderCompany = 0`. That's the view without scoring or audit layers.
+  - All mailbox changes live in the host page: CSS hides Back, Print to PDF, Zip, Snapshots, Heatmap and sharing; `ftnGetCMSFiles`/`refreshOFiles`/`buildAvailExams` become no-ops; the document "+" goes straight to the file picker (no "from CMS"); the remove "x" shows only on your own uploads; and documents open through `exam/{item}/doc/{fid}`.
+- **`IaViewerController.Exam.cs`** holds the exam handler. `main/adHoc` and `main/adHocAttach` hand ExamTask items to it. It also serves `exam/{item}/bootstrap` and `exam/{item}/doc/{fid}`.
+  - Every call runs the `MBX_GetExamTask` gate, an allowlist, examid/xcid pinning, and the answer/line/file ownership checks.
+  - Writes stop at Completed, and the first write moves the task to Pending Review.
+- **CMS:** the Exams tab in `AssignTask.js` uses `main/GetAssignableExams`. `MailboxShareController` gained an `Exam` task type with `MBX_GetExamTaskCandidates`.
+
+**Exams on replies, and the assigner's view (sql/020, 2026-10-22):**
+- **Replies:** a reply carries the exam as an `ExamRef` item that points at the original ExamTask.
+- **Gate:** `MBX_GetExamAccess` replaces `MBX_GetExamTask`, and decides the role.
+  - **Assignee:** the examined company's view, with writes until Completed.
+  - **Assigner:** **the full management view** (John's choice), meaning `viewMgtExam(ExamID, ExamCID, company)` with `byFolderCompany = 1`, so it includes scoring and audit layers, with writes unless Cancelled. It adds two assigner-only writes, `_SetExamDefaultScores` and `_MgtUpdateLMC`, both pinned with a line check.
+  - **For both:** the heatmap report, PDF, zip and snapshots stay hidden. They use CMS-only report routes.
+- **Where the assigner sees it:** in Sent (the original) and on any reply.
+- **Status:** the reply copy shows the original task's status, plus Mark as Completed while it's Pending Review.
+
+**Re-syncing after an exam change in CMS:** copy `CMS/wwwroot/js/managementExamsNEW.js` (the committed version) over `CMSMailbox/wwwroot/js/managementExamsNEW.js`. Nothing in it is patched. Copy any new images it references (`icon=...png`) from `CMS/wwwroot/images` to `CMSMailbox/wwwroot/images`. Then check that `exam-viewer.html`'s overrides still match: `MGTUploadDocs`, `MGTPopDocs`, `reportLoadFiles`, `ftnGetCMSFiles`, `refreshOFiles`, `buildAvailExams`, and the CSS hides. If the viewer starts calling a new exam proc, add it to `ExamReadActions` or `ExamWriteActions` in `IaViewerController.Exam.cs`, with a pin or ownership check if it takes an answer or file ID.
+
+## After the phases (requested 2026-10-22)
+
+- **File attachments on secure messages**, separate from tasks: let a sender attach their own files to a secure email, alongside or instead of tasks. John asked for this once Phases 3 and 4 are done.
+
 ## Phases
 1. **Foundation + Form Application task:** SQL 006, the CMS popup and picker, the task card in the mailbox, and IA new-record mode. Delivers one complete task type from start to finish.
 2. **Dynamic Report task.**
