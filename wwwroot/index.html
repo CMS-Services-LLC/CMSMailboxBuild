@@ -396,16 +396,22 @@
             document.getElementById("loginScreen").style.display = "none";
             document.getElementById("appScreen").style.display = "block";
             startSession();
-            setFolder("inbox");
 
             // Deep link from the share-notification email (?message=<id>) — open it
             // once, then strip the query string so a page refresh doesn't re-trigger it.
             var params = new URLSearchParams(window.location.search);
             var deepLinkMessageId = params.get("message");
-            if (deepLinkMessageId) {
-                openMessage(parseInt(deepLinkMessageId));
-                window.history.replaceState({}, "", window.location.pathname);
-            }
+            if (deepLinkMessageId) window.history.replaceState({}, "", window.location.pathname);
+
+            // Refresh this user's access cache (NEO_ResetUserCreds, as CMS does on every page load)
+            // before listing or opening anything; the access checks read from it. A failed refresh
+            // still loads the page.
+            api("/auth/refresh-access", { method: "POST" })
+                .catch(function () { })
+                .then(function () {
+                    setFolder("inbox");
+                    if (deepLinkMessageId) openMessage(parseInt(deepLinkMessageId));
+                });
         }
 
         // Loads whichever folder is current. `folder` is captured up front so a slow

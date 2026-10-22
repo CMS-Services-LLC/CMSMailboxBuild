@@ -153,6 +153,26 @@ namespace CMSMailbox.Controllers
             return Ok(new { token = new TokenGenerator().GenerateToken(uid) });
         }
 
+        // Rebuilds the user's NEO_CacheUserAccess (NEO_ResetUserCreds), which NEO_NewSecurity — and so
+        // the mailbox's own access gates — read from. CMS does this on every page load (global.js); the
+        // page calls this on every load too, before it lists or opens anything. Without it a brand-new
+        // user's cache is empty and every gate refuses them.
+        [HttpPost("refresh-access")]
+        public IActionResult RefreshAccess()
+        {
+            string bearer = "";
+            if (Request.Headers.TryGetValue(Microsoft.Net.Http.Headers.HeaderNames.Authorization, out var auth))
+            {
+                var parts = auth.FirstOrDefault()?.Split(' ');
+                bearer = (parts != null && parts.Length > 1) ? parts[1] : "";
+            }
+
+            if (!int.TryParse(TokenGenerator.ValidateAndGetUID(bearer, out _), out int uid) || uid == 0) return Unauthorized();
+
+            DB.GetDB("exec NEO_ResetUserCreds @uid", uid);
+            return Ok(new { status = "ok" });
+        }
+
         // Who's logged in, for the top bar's "Logged in as:".
         [HttpGet("me")]
         public IActionResult Me()

@@ -19,7 +19,10 @@
         button.secondary { background: #fff; color: #2c6bd6; border: 1px solid #2c6bd6; }
         .error { color: #c0392b; font-size: 13px; min-height: 18px; margin-top: 8px; }
         .rules { font-size: 12px; color: #555; margin: 4px 0 0 0; padding-left: 18px; }
+        .rules { list-style: none; padding-left: 0; }
+        .rules li::before { content: "\2717  "; color: #c0392b; }
         .rules li.ok { color: #2e7d32; }
+        .rules li.ok::before { content: "\2713  "; color: #2e7d32; }
         .steps { font-size: 12px; color: #777; margin-bottom: 14px; }
         ol.howto { font-size: 13px; padding-left: 20px; line-height: 1.5; }
         #qr { display: block; margin: 10px auto; max-width: 220px; }
@@ -52,9 +55,9 @@
             <p class="sub">Create a password for your CMS account. You'll use it, with your authenticator app, to sign in to CMS and CMS Secure Email.</p>
             <div class="user">Your username: <b id="username"></b></div>
             <label for="pwd">New password</label>
-            <input id="pwd" type="password" autocomplete="new-password" oninput="checkRules()" />
+            <input id="pwd" type="password" autocomplete="new-password" oninput="checkRules(); pwdError.innerText = ''" />
             <label for="pwd2">Confirm password</label>
-            <input id="pwd2" type="password" autocomplete="new-password" oninput="checkRules()" onkeyup="if (event.key === 'Enter') toTotp()" />
+            <input id="pwd2" type="password" autocomplete="new-password" oninput="checkRules(); pwdError.innerText = ''"onkeyup="if (event.key === 'Enter') toTotp()" />
             <ul class="rules" id="rules">
                 <li data-rule="len">At least 12 characters</li>
                 <li data-rule="mix">An uppercase letter, a lowercase letter, a number and a symbol</li>
@@ -142,13 +145,21 @@
         function checkRules() {
             var r = rules();
             document.querySelectorAll("#rules li").forEach(function (li) { li.classList.toggle("ok", !!r[li.dataset.rule]); });
-            document.getElementById("pwdError").innerText = "";
         }
 
         function toTotp() {
-            var r = rules();
-            if (!(r.len && r.mix && r.apos && r.match)) {
-                document.getElementById("pwdError").innerText = "Your password doesn't meet all the rules above yet.";
+            var r = rules(), p = document.getElementById("pwd").value, missing = [];
+            checkRules();
+            if (p.length < 12) missing.push("it is " + p.length + " characters; it needs at least 12");
+            if (p.length > 100) missing.push("it is longer than 100 characters");
+            if (!/[A-Z]/.test(p)) missing.push("add an uppercase letter");
+            if (!/[a-z]/.test(p)) missing.push("add a lowercase letter");
+            if (!/[0-9]/.test(p)) missing.push("add a number");
+            if (!/[^A-Za-z0-9]/.test(p)) missing.push("add a symbol such as ! @ # $ %");
+            if (p.indexOf("'") > -1) missing.push("remove the apostrophe (')");
+            if (!r.match) missing.push("the two entries don't match");
+            if (missing.length) {
+                document.getElementById("pwdError").innerText = "Almost there: " + missing.join("; ") + ".";
                 return;
             }
             show("stepTotp");
