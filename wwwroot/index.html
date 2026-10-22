@@ -37,6 +37,9 @@
         #folderTabs button:hover { background: #f0f4fa; }
         #folderTabs button.active { color: #2c6bd6; border-bottom-color: #2c6bd6; font-weight: bold; }
         #inboxList { flex: 1; min-height: 0; overflow-y: auto; }
+        #searchBox { flex-shrink: 0; padding: 8px 10px; border-bottom: 1px solid #ddd; display: flex; gap: 6px; align-items: center; }
+        #searchBox input { flex: 1; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; }
+        #searchClear { background: none; border: none; color: #777; cursor: pointer; font-size: 16px; display: none; }
         .msgRow { padding: 10px 14px; border-bottom: 1px solid #eee; cursor: pointer; }
         .msgRow:hover { background: #f0f4fa; }
         .msgRow.unread { font-weight: bold; }
@@ -168,6 +171,10 @@
                     <button id="tab_inbox" class="active" onclick="setFolder('inbox')">Inbox</button>
                     <button id="tab_sent" onclick="setFolder('sent')">Sent</button>
                     <button id="tab_archived" onclick="setFolder('archived')">Archived</button>
+                </div>
+                <div id="searchBox">
+                    <input id="searchInput" type="search" placeholder="Search subject, sender, company..." oninput="renderList()" />
+                    <button id="searchClear" title="Clear search" onclick="clearSearch()">&times;</button>
                 </div>
                 <div id="inboxList"></div>
             </div>
@@ -404,6 +411,54 @@
         // Loads whichever folder is current. `folder` is captured up front so a slow
         // response for a folder the user has already clicked away from can't paint over
         // the list for the one they're now looking at.
+        // The current folder's messages as last loaded; renderList() draws them,
+        // filtered by the search box. Search is client-side over what the folder
+        // already returned (subject, sender, company, recipients) — no extra request.
+        var folderRows = [];
+
+        function clearSearch() {
+            document.getElementById("searchInput").value = "";
+            renderList();
+            document.getElementById("searchInput").focus();
+        }
+
+        function renderList() {
+            var folder = currentFolder;
+            var q = document.getElementById("searchInput").value.trim().toLowerCase();
+            document.getElementById("searchClear").style.display = q ? "block" : "none";
+            var terms = q ? q.split(/\s+/) : [];
+            // Every word typed must appear somewhere in the message's text.
+            var rows = folderRows.filter(function (m) {
+                if (terms.length === 0) return true;
+                var hay = [m.Subject, m.FromName, m.FromCompany, m.ToNames].join(" ").toLowerCase();
+                return terms.every(function (t) { return hay.indexOf(t) > -1; });
+            });
+
+            var list = document.getElementById("inboxList");
+            list.innerHTML = "";
+            if (rows.length === 0) {
+                var emptyText = q ? "No messages match your search."
+                    : { inbox: "No messages.", sent: "No sent messages.", archived: "No archived messages." }[folder];
+                list.innerHTML = "<p class='hint' style='padding:14px'>" + emptyText + "</p>";
+                return;
+            }
+            rows.forEach(function (m) {
+                var div = document.createElement("div");
+                // Unread emphasis only means something in the Inbox.
+                div.className = "msgRow" + (folder === "inbox" && !m.DTViewed ? " unread" : "");
+                div.onclick = function () { openMessage(m.MessageID); };
+                div.setAttribute("data-message-id", m.MessageID);
+                if (m.MessageID === currentMessageId) div.classList.add("selected");
+                var who = folder === "sent"
+                    ? "To " + escapeHtml(m.ToNames || "")
+                    : escapeHtml(m.FromName) + " (" + escapeHtml(m.FromCompany) + ")";
+                div.innerHTML = "<span class='subj'>" + escapeHtml(m.Subject) + "</span>" +
+                    "<span class='meta'>" + who + " &middot; " +
+                    new Date(m.DTCreated).toLocaleString() + "</span>";
+                list.appendChild(div);
+            });
+        }
+
         function loadInbox() {
             var folder = currentFolder;
             api("/inbox?folder=" + folder)
@@ -413,29 +468,8 @@
                 })
                 .then(function (txt) {
                     if (folder !== currentFolder) return;
-                    var rows = JSON.parse(txt);
-                    var list = document.getElementById("inboxList");
-                    list.innerHTML = "";
-                    if (rows.length === 0) {
-                        var emptyText = { inbox: "No messages.", sent: "No sent messages.", archived: "No archived messages." }[folder];
-                        list.innerHTML = "<p class='hint' style='padding:14px'>" + emptyText + "</p>";
-                        return;
-                    }
-                    rows.forEach(function (m) {
-                        var div = document.createElement("div");
-                        // Unread emphasis only means something in the Inbox.
-                        div.className = "msgRow" + (folder === "inbox" && !m.DTViewed ? " unread" : "");
-                        div.onclick = function () { openMessage(m.MessageID); };
-                        div.setAttribute("data-message-id", m.MessageID);
-                        if (m.MessageID === currentMessageId) div.classList.add("selected");
-                        var who = folder === "sent"
-                            ? "To " + escapeHtml(m.ToNames || "")
-                            : escapeHtml(m.FromName) + " (" + escapeHtml(m.FromCompany) + ")";
-                        div.innerHTML = "<span class='subj'>" + escapeHtml(m.Subject) + "</span>" +
-                            "<span class='meta'>" + who + " &middot; " +
-                            new Date(m.DTCreated).toLocaleString() + "</span>";
-                        list.appendChild(div);
-                    });
+                    folderRows = JSON.parse(txt);
+                    renderList();
                 })
                 .catch(function (ex) { console.log("loadInbox failed", ex); });
         }
