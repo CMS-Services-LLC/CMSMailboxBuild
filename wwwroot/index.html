@@ -148,9 +148,9 @@
         </div>
         <div id="loginLoadingBanner" style="display:none;text-align:center;padding:12px"><img src="loading.gif" width="32" height="32" /></div>
         <div id="mfaStep" style="display:none">
-            <p class="hint" id="mfaHint">Enter your authenticator code.</p>
+            <p class="hint" id="mfaHint">Enter your authenticator code, or one of your backup codes.</p>
             <img id="mfaBarcode" style="display:none;max-width:100%" />
-            <input id="passcode" placeholder="6-digit code" autocomplete="one-time-code" onkeyup="if (event.key === 'Enter') doVerify2fa()" />
+            <input id="passcode" placeholder="6-digit code or backup code" autocomplete="one-time-code" onkeyup="if (event.key === 'Enter') doVerify2fa()" />
             <button onclick="doVerify2fa()">Verify</button>
         </div>
         <div class="err" id="loginError"></div>

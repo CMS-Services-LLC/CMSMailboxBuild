@@ -1,5 +1,7 @@
 using System.Net.Http;
 using System.Security.Authentication;
+using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -45,6 +47,16 @@ namespace CMSMailbox
                     SslProtocols = SslProtocols.Tls12
                 });
             }
+
+            // Account activation (ActivationController): at most 20 calls per 5 minutes per IP, on top
+            // of each link's own 10-wrong-codes limit.
+            services.AddRateLimiter(o =>
+            {
+                o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+                o.AddPolicy("activation", ctx => RateLimitPartition.GetFixedWindowLimiter(
+                    ctx.Connection.RemoteIpAddress?.ToString() ?? "",
+                    _ => new FixedWindowRateLimiterOptions { PermitLimit = 20, Window = System.TimeSpan.FromMinutes(5) }));
+            });
         }
 
         public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
@@ -76,6 +88,7 @@ namespace CMSMailbox
             });
 
             app.UseRouting();
+            app.UseRateLimiter();
 
             app.UseAuthorization();
 

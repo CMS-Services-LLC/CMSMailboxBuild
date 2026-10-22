@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- The activation token arrives in this page's #fragment; never send this address anywhere. -->
+    <meta name="referrer" content="no-referrer" />
+    <title>Activate CMS Secure Email</title>
+    <style>
+        /* Same look as index.html's login card. */
+        body { font-family: Segoe UI, Arial, sans-serif; margin: 0; background: #f4f6f8; color: #222; }
+        .card { max-width: 440px; margin: 60px auto; background: #fff; padding: 24px 28px; border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        h2 { margin: 0 0 6px 0; font-size: 20px; }
+        .sub { color: #555; font-size: 14px; margin: 0 0 18px 0; }
+        label { display: block; font-size: 13px; font-weight: 600; margin-top: 10px; }
+        input { width: 100%; padding: 8px; margin: 4px 0 6px; box-sizing: border-box; font-size: 14px; }
+        button { width: 100%; padding: 10px; background: #2c6bd6; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; margin-top: 12px; }
+        button:disabled { background: #9db6e3; cursor: default; }
+        button.secondary { background: #fff; color: #2c6bd6; border: 1px solid #2c6bd6; }
+        .error { color: #c0392b; font-size: 13px; min-height: 18px; margin-top: 8px; }
+        .rules { font-size: 12px; color: #555; margin: 4px 0 0 0; padding-left: 18px; }
+        .rules li.ok { color: #2e7d32; }
+        .steps { font-size: 12px; color: #777; margin-bottom: 14px; }
+        ol.howto { font-size: 13px; padding-left: 20px; line-height: 1.5; }
+        #qr { display: block; margin: 10px auto; max-width: 220px; }
+        .key { font-family: Consolas, monospace; background: #f0f4fa; padding: 6px 8px; border-radius: 4px; word-break: break-all; font-size: 13px; }
+        .codes { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 18px; font-family: Consolas, monospace; font-size: 15px; background: #f0f4fa; padding: 12px 16px; border-radius: 4px; margin: 12px 0; }
+        .warn { background: #fff6e0; border: 1px solid #f0d58c; padding: 10px; border-radius: 4px; font-size: 13px; }
+        .user { font-size: 13px; background: #f0f4fa; padding: 8px 10px; border-radius: 4px; }
+        .row { display: flex; gap: 8px; }
+        .row button { margin-top: 6px; }
+        .check { display: flex; gap: 8px; align-items: center; font-size: 13px; margin-top: 12px; font-weight: normal; }
+        .check input { width: auto; margin: 0; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div id="stepLoading"><p class="sub">Checking your activation link…</p></div>
+
+        <div id="stepInvalid" class="hidden">
+            <h2>This link is invalid or has expired</h2>
+            <p class="sub">Activation links work once and expire after 48 hours. If you need a new one, please contact
+                <a href="mailto:info@cms-services.net">info@cms-services.net</a>.</p>
+            <p class="sub">Already set up? <a href="/">Sign in to CMS Secure Email</a>.</p>
+        </div>
+
+        <!-- Step 1: password -->
+        <div id="stepPassword" class="hidden">
+            <div class="steps">Step 1 of 3</div>
+            <h2 id="hello">Welcome</h2>
+            <p class="sub">Create a password for your CMS account. You'll use it, with your authenticator app, to sign in to CMS and CMS Secure Email.</p>
+            <div class="user">Your username: <b id="username"></b></div>
+            <label for="pwd">New password</label>
+            <input id="pwd" type="password" autocomplete="new-password" oninput="checkRules()" />
+            <label for="pwd2">Confirm password</label>
+            <input id="pwd2" type="password" autocomplete="new-password" oninput="checkRules()" onkeyup="if (event.key === 'Enter') toTotp()" />
+            <ul class="rules" id="rules">
+                <li data-rule="len">At least 12 characters</li>
+                <li data-rule="mix">An uppercase letter, a lowercase letter, a number and a symbol</li>
+                <li data-rule="apos">No apostrophes (')</li>
+                <li data-rule="match">Both entries match</li>
+            </ul>
+            <div class="error" id="pwdError"></div>
+            <button onclick="toTotp()">Next</button>
+        </div>
+
+        <!-- Step 2: authenticator -->
+        <div id="stepTotp" class="hidden">
+            <div class="steps">Step 2 of 3</div>
+            <h2>Set up two-factor authentication</h2>
+            <ol class="howto">
+                <li>Install an authenticator app on your phone if you don't already have one (Google Authenticator, Microsoft Authenticator, Authy, or 1Password all work).</li>
+                <li>Open the app and choose "Add account" or "Scan QR code".</li>
+                <li>Scan the QR code shown below.</li>
+                <li>Enter the 6-digit code from the app to confirm setup.</li>
+                <li>Save the backup codes that appear after confirmation. Store them somewhere safe (not in the same place as your password).</li>
+            </ol>
+            <img id="qr" alt="QR code for your authenticator app" />
+            <p class="sub" style="margin:8px 0 4px">If you cannot scan the QR code, you can enter this key manually:</p>
+            <div class="key" id="manualKey"></div>
+            <label for="code">6-digit code</label>
+            <input id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" onkeyup="if (event.key === 'Enter') complete()" />
+            <div class="error" id="codeError"></div>
+            <button id="btnActivate" onclick="complete()">Activate my account</button>
+            <button class="secondary" onclick="show('stepPassword')">Back</button>
+        </div>
+
+        <!-- Step 3: backup codes -->
+        <div id="stepCodes" class="hidden">
+            <div class="steps">Step 3 of 3</div>
+            <h2>Save your backup codes</h2>
+            <p class="sub">Your account is active. If you lose your phone, each of these codes can be used <b>once</b> in place of an authenticator code.</p>
+            <div class="codes" id="codes"></div>
+            <div class="warn">These codes are shown only this one time. Store them somewhere safe, not in the same place as your password.</div>
+            <div class="row">
+                <button class="secondary" onclick="copyCodes()">Copy</button>
+                <button class="secondary" onclick="downloadCodes()">Download</button>
+            </div>
+            <label class="check"><input type="checkbox" id="saved" onchange="document.getElementById('btnContinue').disabled = !this.checked" /> I have saved my backup codes</label>
+            <button id="btnContinue" disabled onclick="finish()">Continue to CMS Secure Email</button>
+        </div>
+    </div>
+
+    <script>
+        // Read the token out of the #fragment, then drop it from the address bar and history.
+        var linkToken = (new URLSearchParams(window.location.hash.slice(1))).get("t") || "";
+        window.history.replaceState({}, "", window.location.pathname);
+        var result = null;
+
+        function show(id) {
+            ["stepLoading", "stepInvalid", "stepPassword", "stepTotp", "stepCodes"].forEach(function (s) {
+                document.getElementById(s).classList.toggle("hidden", s !== id);
+            });
+        }
+
+        function post(path, body) {
+            return fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+                .then(function (r) {
+                    if (r.status === 429) return { status: "slow_down" };
+                    return r.json();
+                });
+        }
+
+        // Mirrors ActivationController.PasswordProblem; the server re-checks.
+        function rules() {
+            var p = document.getElementById("pwd").value, p2 = document.getElementById("pwd2").value;
+            return {
+                len: p.length >= 12 && p.length <= 100,
+                mix: /[A-Z]/.test(p) && /[a-z]/.test(p) && /[0-9]/.test(p) && /[^A-Za-z0-9]/.test(p),
+                apos: p.length > 0 && p.indexOf("'") === -1,
+                match: p.length > 0 && p === p2
+            };
+        }
+
+        function checkRules() {
+            var r = rules();
+            document.querySelectorAll("#rules li").forEach(function (li) { li.classList.toggle("ok", !!r[li.dataset.rule]); });
+            document.getElementById("pwdError").innerText = "";
+        }
+
+        function toTotp() {
+            var r = rules();
+            if (!(r.len && r.mix && r.apos && r.match)) {
+                document.getElementById("pwdError").innerText = "Your password doesn't meet all the rules above yet.";
+                return;
+            }
+            show("stepTotp");
+            document.getElementById("code").focus();
+        }
+
+        function complete() {
+            var code = document.getElementById("code").value.trim();
+            var err = document.getElementById("codeError");
+            err.innerText = "";
+            if (!/^\d{6}$/.test(code)) { err.innerText = "Enter the 6-digit code from your authenticator app."; return; }
+
+            var btn = document.getElementById("btnActivate");
+            btn.disabled = true;
+            post("activate/complete", { Token: linkToken, Password: document.getElementById("pwd").value, Passcode: code })
+                .then(function (res) {
+                    btn.disabled = false;
+                    if (res.status === "ok") {
+                        result = res;
+                        document.getElementById("pwd").value = document.getElementById("pwd2").value = "";
+                        document.getElementById("codes").innerHTML = res.backupCodes.map(function (c) { return "<div>" + c + "</div>"; }).join("");
+                        show("stepCodes");
+                    } else if (res.status === "invalid_code") {
+                        err.innerText = "That code didn't match. Check the time on your phone is correct and try the newest code.";
+                    } else if (res.status === "bad_password") {
+                        show("stepPassword");
+                        document.getElementById("pwdError").innerText = res.message || "Please choose a different password.";
+                    } else if (res.status === "slow_down") {
+                        err.innerText = "Too many attempts. Please wait a few minutes and try again.";
+                    } else {
+                        show("stepInvalid");
+                    }
+                })
+                .catch(function () { btn.disabled = false; err.innerText = "Could not reach the server. Please try again."; });
+        }
+
+        function codesText() {
+            return "CMS Secure Email backup codes for " + result.username + "\r\n" +
+                "Each code works once, in place of an authenticator code.\r\n\r\n" + result.backupCodes.join("\r\n") + "\r\n";
+        }
+
+        function copyCodes() {
+            navigator.clipboard.writeText(codesText()).catch(function () { });
+        }
+
+        function downloadCodes() {
+            var a = document.createElement("a");
+            a.href = URL.createObjectURL(new Blob([codesText()], { type: "text/plain" }));
+            a.download = "cms-secure-email-backup-codes.txt";
+            a.click();
+            setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+        }
+
+        // Signed in already: hand the session to the mailbox page and open the message.
+        function finish() {
+            sessionStorage.setItem("mbxToken", result.token);
+            window.location.replace("/" + (result.messageId ? "?message=" + result.messageId : ""));
+        }
+
+        (function start() {
+            if (!/^[0-9a-f]{64}$/i.test(linkToken)) { show("stepInvalid"); return; }
+            post("activate/start", { Token: linkToken })
+                .then(function (res) {
+                    if (res.status !== "ok") { show("stepInvalid"); return; }
+                    document.getElementById("hello").innerText = "Welcome, " + (res.firstName || "there");
+                    document.getElementById("username").innerText = res.username;
+                    document.getElementById("qr").src = res.barcodeUrl;
+                    document.getElementById("manualKey").innerText = res.manualKey;
+                    show("stepPassword");
+                    document.getElementById("pwd").focus();
+                })
+                .catch(function () { show("stepInvalid"); });
+        })();
+    </script>
+</body>
+</html>

@@ -87,6 +87,14 @@ namespace CMSMailbox.Controllers
             string uniqueKeyForUser = useMfaToken + DB.GmfaKey;
             bool isValid = tfa.ValidateTwoFactorPIN(uniqueKeyForUser, req.Passcode, TimeSpan.FromSeconds(5));
 
+            // A one-time backup code from setup (sql/016) in place of the authenticator code.
+            if (!isValid && BackupCodes.LooksLikeOne(req.Passcode))
+            {
+                var bc = DB.GetDB("exec MBX_UseBackupCode @email, @codeHash", 0,
+                    new JObject { ["email"] = email, ["codeHash"] = BackupCodes.Hash(req.Passcode) }.ToString());
+                isValid = bc.Rows.Count > 0 && bc.Columns.Contains("Used") && bc.Rows[0]["Used"].ToString() == "True";
+            }
+
             if (!isValid)
             {
                 return Ok(new { status = "invalid_passcode" });
