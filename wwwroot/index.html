@@ -16,6 +16,11 @@
         #loginScreen { max-width: 360px; margin: 80px auto; background: #fff; padding: 24px; border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
         #loginScreen input { width: 100%; padding: 8px; margin: 6px 0 14px; box-sizing: border-box; }
         #loginScreen button { width: 100%; padding: 10px; background: #2c6bd6; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
+        #forgotLink { display: block; margin-top: 10px; text-align: center; font-size: 13px; color: #2c6bd6; cursor: pointer; text-decoration: underline; background: none; border: none; width: auto; padding: 0; }
+        #forgotHelp { display: none; margin-top: 12px; padding: 12px; background: #f6f8fb; border: 1px solid #dde3ec; border-radius: 4px; font-size: 13px; color: #333; }
+        #forgotHelp p { margin: 0 0 8px; }
+        #forgotHelp ul { margin: 4px 0 8px; padding-left: 18px; }
+        #forgotHelp li { margin-bottom: 4px; }
         #appScreen { display: none; height: 100vh; }
         /* The page starts on #startScreen and only then shows the login form or the
            app (see startup() at the bottom), so a handoff from CMSNEO never flashes
@@ -36,6 +41,9 @@
         #folderTabs button { flex: 1; padding: 10px 0; background: #fff; border: none; border-bottom: 3px solid transparent; cursor: pointer; font-size: 14px; color: #555; }
         #folderTabs button:hover { background: #f0f4fa; }
         #folderTabs button.active { color: #2c6bd6; border-bottom-color: #2c6bd6; font-weight: bold; }
+        #folderTabs button#refreshBtn { flex: 0 0 auto; padding: 10px 12px; font-size: 16px; color: #2c6bd6; }
+        #folderTabs button#refreshBtn:disabled { color: #aaa; cursor: default; }
+        .listLoading { padding: 18px 14px; color: #777; font-size: 13px; display: flex; align-items: center; gap: 8px; }
         #inboxList { flex: 1; min-height: 0; overflow-y: auto; }
         #searchBox { flex-shrink: 0; padding: 8px 10px; border-bottom: 1px solid #ddd; display: flex; gap: 6px; align-items: center; }
         #searchBox input { flex: 1; min-width: 0; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; }
@@ -150,6 +158,20 @@
             <input id="username" placeholder="Username" autocomplete="username" onkeyup="if (event.key === 'Enter') doLogin()" />
             <input id="password" type="password" placeholder="Password" autocomplete="current-password" onkeyup="if (event.key === 'Enter') doLogin()" />
             <button onclick="doLogin()">Log In</button>
+            <button id="forgotLink" type="button" onclick="toggleForgotHelp()">Forgot password?</button>
+            <!-- CMS has no self-service reset: the mailbox uses the CMS login itself, so this
+                 points people at it, at their browser's saved passwords, and at their admin. -->
+            <div id="forgotHelp">
+                <p><b>Use your CMS username and password.</b> The Secure Mailbox signs you in with the same account you use for CMS; there is no separate mailbox password.</p>
+                <p>If your browser saved your CMS password, you can look it up (search for <b>cms-services</b>; your computer may ask for its own password first):</p>
+                <ul>
+                    <li><b>Chrome:</b> menu &#8942; &rarr; Passwords and autofill &rarr; Google Password Manager</li>
+                    <li><b>Edge:</b> menu &middot;&middot;&middot; &rarr; Settings &rarr; Passwords</li>
+                    <li><b>Firefox:</b> menu &#9776; &rarr; Passwords</li>
+                    <li><b>A password manager app</b> (1Password, LastPass, Bitwarden, ...): search it for cms-services</li>
+                </ul>
+                <p>Still can't find it? Ask your company's CMS administrator to reset your password, or contact CMS Services at <a href="mailto:info@cms-services.net">info@cms-services.net</a>.</p>
+            </div>
         </div>
         <div id="loginLoadingBanner" style="display:none;text-align:center;padding:12px"><img src="loading.gif" width="32" height="32" /></div>
         <div id="mfaStep" style="display:none">
@@ -176,6 +198,7 @@
                     <button id="tab_inbox" class="active" onclick="setFolder('inbox')">Inbox</button>
                     <button id="tab_sent" onclick="setFolder('sent')">Sent</button>
                     <button id="tab_archived" onclick="setFolder('archived')">Archived</button>
+                    <button id="refreshBtn" title="Refresh messages" onclick="refreshMailbox()">&#8635;</button>
                 </div>
                 <div id="searchBox">
                     <input id="searchInput" type="search" placeholder="Search subject, task, sender..." oninput="renderList()" />
@@ -290,6 +313,11 @@
             document.getElementById("mfaStep").style.display = "none";
             document.getElementById("loginStep").style.display = "block";
             document.getElementById("passcode").value = "";
+            // Don't leave this user's list or open message in the page for whoever logs in next.
+            folderRows = [];
+            currentMessageId = null;
+            document.getElementById("inboxList").innerHTML = "";
+            document.getElementById("messagePane").innerHTML = EMPTY_PANE_HTML;
         }
 
         // Switching folders always clears the open message — it may not belong to the
@@ -303,8 +331,7 @@
             document.getElementById("messagePane").innerHTML = EMPTY_PANE_HTML;
             // Don't leave the previous folder's rows on screen under the new tab while
             // the new list is still loading.
-            document.getElementById("inboxList").innerHTML = "<p class='hint' style='padding:14px'>Loading...</p>";
-            loadInbox();
+            loadInbox(true);
         }
 
         // ---- Session: idle timeout + heartbeat (same idea as CMSNEO's layout.js /
@@ -443,6 +470,11 @@
         // show only under All.
         var folderRows = [];
 
+        function toggleForgotHelp() {
+            var help = document.getElementById("forgotHelp");
+            help.style.display = help.style.display === "block" ? "none" : "block";
+        }
+
         function clearSearch() {
             document.getElementById("searchInput").value = "";
             renderList();
@@ -491,8 +523,15 @@
             });
         }
 
-        function loadInbox() {
+        var LIST_LOADING_HTML = "<div class='listLoading'><img src='loading.gif' width='20' height='20' alt='' />Please wait while messages are loading...</div>";
+
+        // showLoading: replace the list with the loading message first (first load, folder
+        // switch, Refresh). Background reloads (after opening a message) leave it alone.
+        function loadInbox(showLoading) {
             var folder = currentFolder;
+            if (showLoading || folderRows.length === 0) document.getElementById("inboxList").innerHTML = LIST_LOADING_HTML;
+            var btn = document.getElementById("refreshBtn");
+            if (btn) btn.disabled = true;
             api("/inbox?folder=" + folder)
                 .then(function (r) {
                     if (r.status === 401) { logout(); throw new Error("unauthorized"); }
@@ -503,7 +542,19 @@
                     folderRows = JSON.parse(txt);
                     renderList();
                 })
-                .catch(function (ex) { console.log("loadInbox failed", ex); });
+                .catch(function (ex) {
+                    console.log("loadInbox failed", ex);
+                    if (folder === currentFolder && folderRows.length === 0)
+                        document.getElementById("inboxList").innerHTML = "<p class='err' style='padding:14px'>Messages couldn't be loaded. Click &#8635; to try again.</p>";
+                })
+                .then(function () { if (btn) btn.disabled = false; });
+        }
+
+        // The &#8635; button: reloads the current folder and, if a message is open, its
+        // task statuses (without re-rendering open forms or reports).
+        function refreshMailbox() {
+            loadInbox(true);
+            if (currentMessageId) refreshTaskCards();
         }
 
         function openMessage(messageId) {
