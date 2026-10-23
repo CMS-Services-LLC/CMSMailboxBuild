@@ -513,9 +513,9 @@ namespace CMSMailbox.Controllers
         private ItemContext ResolveAndGateByMessageItem(int messageItemId, int uid)
         {
             var lookup = DB.GetDB(
+                // A recipient, or a colleague the item's task was shared with by its assignee (sql/028).
                 "select mi.ItemType, mi.ItemID, mi.FormID from MBX_MessageItem mi " +
-                "join MBX_Recipient r on r.MessageID = mi.MessageID and r.ToUID = @uid " +
-                "where mi.MessageItemID = @messageItemId",
+                "where mi.MessageItemID = @messageItemId and dbo.MBX_CanOpenItem(mi.MessageItemID, @uid) = 1",
                 uid, "{\"messageItemId\":" + messageItemId + "}");
 
             if (lookup.Rows.Count == 0 || lookup.Columns.Contains("err") ||
@@ -585,8 +585,7 @@ namespace CMSMailbox.Controllers
         {
             var lookup = DB.GetDB(
                 "select top 1 mi.FormID from MBX_MessageItem mi " +
-                "join MBX_Recipient r on r.MessageID = mi.MessageID and r.ToUID = @uid " +
-                "where mi.ItemType = 'IAFormRecord' and mi.ItemID = @mainId",
+                "where mi.ItemType = 'IAFormRecord' and mi.ItemID = @mainId and dbo.MBX_CanOpenItem(mi.MessageItemID, @uid) = 1",
                 uid, "{\"mainId\":\"" + mainId + "\"}");
 
             if (lookup.Rows.Count == 0 || lookup.Columns.Contains("err")) return null;
@@ -613,10 +612,10 @@ namespace CMSMailbox.Controllers
             var dat = DB.GetDB(
                 "select top 1 1 as x " +
                 "from MBX_MessageItem mi " +
-                "join MBX_Recipient r on r.MessageID = mi.MessageID and r.ToUID = @uid " +
                 "join NEO_IAFormRecords xfr on xfr.ID = try_cast(mi.ItemID as int) " +
                 "join NEO_IAFormRecords fr on fr.RecordID = xfr.RecordID and fr.active = 1 " +
                 "where mi.MessageItemID = @messageItemId and mi.ItemType = 'IAFormRecord' and mi.ItemID <> '0' " +
+                "and dbo.MBX_CanOpenItem(mi.MessageItemID, @uid) = 1 " +
                 "and fr.DTReleased is null and fr.CID <> dbo.mycid(@uid)",
                 uid, "{\"messageItemId\":" + messageItemId + "}");
 

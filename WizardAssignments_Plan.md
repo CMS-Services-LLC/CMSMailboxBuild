@@ -117,7 +117,7 @@ From the CMSNEO dashboard, a management-company user opens a window from "What w
 ## Phase 4: Tracking (built 2026-10-23, untested, sql/021 not run)
 
 John didn't pick from the design options, so these are the defaults and can change:
-- **Entry point:** "Track Assigned Tasks..." in the dashboard's "What would you like to do?" list, next to Assign Tasks (same `MgtCID == 1518` gate). It's a separate overlay (`CMS/wwwroot/js/TrackTasks.js`) so the Phase 6 wizard rework doesn't touch it.
+- **Entry point:** "Track Assigned Tasks..." in the dashboard's "What would you like to do?" list, next to Assign Tasks (same `MgtCID == 1518` gate). It's a separate overlay (`CMS/wwwroot/js/TrackTasks.js`) so the Phase 5 wizard rework doesn't touch it.
 - **Scope:** "Assigned by me" (default) or "My company" (every task assigned by anyone in the user's own company, `dbo.mycid`). Only the user's own rows get action buttons, and every action re-checks `MBX_IsTaskAssigner` server-side.
 - **Columns and filters:** task + subject, assignee + company, assigner (company view), sent, due (red when overdue), status (with completed/cancelled date or reminder count). Filters: Not finished (default), Pending my review, Overdue, Completed, Cancelled, All; plus a text search.
 - **Actions:**
@@ -130,13 +130,43 @@ John didn't pick from the design options, so these are the defaults and can chan
 - **SQL 021:** new `MBX_Task` columns (`DTCancelled`, `CancelledByUID`, `DTLastReminder`, `ReminderCount`), plus `MBX_GetAssignedTasks`, `MBX_CancelTask`, `MBX_RemindTask` and the new `MBX_CreateHandoffCode`.
 - **CMS routes** (`MailboxShareController`): `main/GetAssignedTasks`, `main/CancelMailboxTask`, `main/ReviewMailboxTask`, `main/RemindMailboxTask`.
 
+## Assign Tasks drafts (built 2026-10-23, untested, sql/027 not run)
+**Save draft** on every step stores the whole wizard on the server (tasks with their Dynamic Report templates, assignee, details, step) in `MBX_TaskDraft` / `MBX_TaskDraftFile`. Opening Assign Tasks lists your drafts (Continue / Delete). Sending a draft deletes it. Closing with unsaved changes asks first.
+
+## Phase 5: Assign Tasks wizard (built 2026-10-23, CMS only, untested, no SQL)
+
+`CMS/wwwroot/js/AssignTask.js`: same overlay, now four steps with a clickable step indicator and Back / Next footer:
+1. **Tasks:** task-type cards (Form Application, Dynamic Report, Exam), the type's inputs, and the list of tasks added so far.
+2. **Assignee:** the picker, which lists only people with access to every task.
+3. **Details:** due date, Require my review (a note says exam tasks always wait for review), subject and message.
+4. **Review & Send:** a summary of everything, with an Edit link back to each step, and Send Tasks.
+
+Next checks every earlier step and stops at the first incomplete one. Nothing changed server-side: every input is built once and only hidden or shown, so candidate loading, validation and SubmitAssignTask are unchanged.
+
+## Phase 7: shared task access (built 2026-10-23, untested, sql/026 not run)
+
+John's choices: shares are made per task from **Track Assigned Tasks**; colleagues must be **in my company** and **hold the task's permission**; access is **Manage** or **Read only**.
+- **Track Assigned Tasks:**
+  - A **Share** button (only the task's real assigner sees it) opens a panel: current shares with a Manage / Read only switch and Remove, and an "Add a colleague" picker.
+  - A new **Shared with me** view; shared rows show "Shared with you: Manage / Read only".
+  - **Manage** gets Open, Mark Completed, Remind and Cancel; **Read only** gets Open.
+- **Candidates:** `MBX_TaskShareCandidates`. People come from `neousers(@UID)` limited to own-company real accounts (`dbo.mycid`). Permissions come from the same rules as the assignee pickers: form grant (team or 'Form Applications' group), 'Dynamic Reports', or 'Exams', plus 'Global Administrator'. The assigner and assignee are excluded.
+- **How access flows:** `MBX_IsTaskAssigner` now means owner OR Manage share, so every assigner action follows it. The original meaning is `MBX_IsTaskOwner`. `MBX_CanViewTask` adds Read shares. Colleagues open the message the way its sender sees it in Sent (no reply or archive), with a "Shared with you by…" banner. Exams open in the management view: Manage as Assigner (with writes), Read only as a new **Viewer** role (no writes). A completed Dynamic Report is viewable; Read only never edits rows.
+- **Not shared:** replies to the message, and the assignee's own form record (which only recipients open, same as for the assigner).
+- **Assignee side (built 2026-10-23, untested, sql/028 not run):** whoever was assigned a task can share it with colleagues in *their* company who hold the task's permission. Sharing happens from CMS's new **My Tasks...** (Assigned to me / Shared with me, with Open and Share) or from the **Share with a colleague** link on the task in the mailbox. **Manage** = work on it as the assignee (fill in and Save for Use the form, upload the report, answer the exam); **Read only** = follow it. These colleagues see only that task's item in the message (no other tasks, replies, reply box or archive), and it appears in their mailbox Inbox tagged "Shared with you". Mechanics: `MBX_TaskShare.Side` ('assigner' | 'assignee'); `MBX_IsTaskAssignee` = assignee OR Manage colleague (original: `MBX_IsTaskAssigneeOwner`); `MBX_CanOpenItem` replaces "is a recipient" in the form viewer and item download; read-only exam colleagues get role 'AssigneeViewer' (the examined view, no writes).
+
 ## Phases
 1. **Foundation + Form Application task:** SQL 006, the CMS popup and picker, the task card in the mailbox, and IA new-record mode. Delivers one complete task type from start to finish.
 2. **Dynamic Report task.**
 3. **Exam task** (the large port).
 4. **Tracking:** an MGT task list in CMS, Sent-folder status, reminder emails if wanted.
-5. **File attachments on secure messages** (requested 2026-10-22), separate from tasks: a sender attaches their own files to a secure email, alongside or instead of tasks.
-6. **Assign Tasks as a wizard** (requested 2026-10-23): rework the Assign Tasks overlay into a cleaner step-by-step wizard (e.g. pick tasks → pick the assignee → message, due date and review → confirm) instead of today's single crowded window.
+5. **Assign Tasks as a wizard** (requested 2026-10-23; moved ahead of attachments the same day): rework the Assign Tasks overlay into a cleaner step-by-step wizard (pick tasks → pick the assignee → message, due date and review → confirm) instead of today's single crowded window.
+6. **File attachments on secure messages** (requested 2026-10-22), separate from tasks: a sender attaches their own files to a secure email, alongside or instead of tasks.
+7. **Shared task access for the assigner's colleagues** (requested 2026-10-23): the assigner can give other users in their own organization access to tasks they assigned, so a colleague can follow, review and act on them as if they were the assigner. To settle when it's built:
+   - **Scope:** per task or message (picked in the wizard or later from Track Assigned Tasks), or a standing delegate who sees everything I assign.
+   - **Who qualifies:** users in my company only, or my whole management tree; and whether they need the task's own permission (e.g. the form grant or Exams).
+   - **What they can do:** view status and open the message in the mailbox; Mark as Completed; remind or cancel; for exams, the full management view and its writes.
+   - **Mechanics:** today every assigner check is `MBX_IsTaskAssigner` (the AssignedByUID person, by email). That becomes "assigner or a granted colleague" (e.g. an `MBX_TaskDelegate` table), and the colleague needs a way into the message: a recipient row with a 'cc' role, or read access to the Sent copy. That touches `MBX_GetMessage`, `MBX_ReviewTask`, `MBX_GetExamAccess`, `MBX_CreateHandoffCode` and the Track Assigned Tasks actions.
 
 ## Needed / to check
 - Proc definitions (look in `SQL_Repos` first): `NEO_MGTGetExams`, `NEO_IASubmitDataByGen300_2` (does it return the new MainID?), `NEO_InsertDynamicReports_v3`, `NEO_NewSECURITY` (MGT detection, DynamicReports/Exams flags), and the exam read/write procs the viewer uses.

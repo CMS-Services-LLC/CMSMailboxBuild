@@ -30,5 +30,45 @@ namespace CMSMailbox.Controllers
 
             return ok ? Ok() : NotFound();
         }
+
+        // Assignee-side sharing (sql/028): whoever was assigned a task shares it with colleagues in
+        // their own company who hold the task's permission. The procs check the caller is the
+        // task's assignee and the colleague is a current candidate. (The assigner shares from
+        // CMS's Track Assigned Tasks.)
+        [HttpGet("task/{taskId:int}/shares")]
+        public IActionResult Shares(int taskId)
+        {
+            int uid = CurrentUID();
+            if (uid == 0) return Unauthorized();
+
+            var p = new JObject { ["taskId"] = taskId, ["side"] = "assignee" }.ToString();
+            var shares = DB.GetDB("exec MBX_GetTaskShares @uid, @taskId, @side", uid, p);
+            if (shares.Columns.Contains("err")) return NotFound();
+            var candidates = DB.GetDB("exec MBX_GetTaskShareCandidates @uid, @taskId, @side", uid, p);
+            if (candidates.Columns.Contains("err")) return NotFound();
+
+            return Ok(new { shares = JArray.FromObject(shares), candidates = JArray.FromObject(candidates) });
+        }
+
+        [HttpPost("task/{taskId:int}/share")]
+        public IActionResult Share(int taskId, [FromBody] ShareRequest req)
+        {
+            int uid = CurrentUID();
+            if (uid == 0) return Unauthorized();
+            string access = req?.Access ?? "";
+            if (access != "manage" && access != "read" && access != "none") return BadRequest();
+
+            var dat = DB.GetDB("exec MBX_SetTaskShare @uid, @taskId, @shareUid, @access, @side", uid,
+                new JObject { ["taskId"] = taskId, ["shareUid"] = req.ShareUid, ["access"] = access, ["side"] = "assignee" }.ToString());
+            if (dat.Rows.Count == 0) return NotFound();
+            if (dat.Columns.Contains("err")) return Ok(new { status = dat.Rows[0]["err"].ToString() });
+            return Ok(new { status = "ok" });
+        }
+    }
+
+    public class ShareRequest
+    {
+        public int ShareUid { get; set; }
+        public string Access { get; set; }
     }
 }

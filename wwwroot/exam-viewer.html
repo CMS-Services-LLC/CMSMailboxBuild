@@ -93,13 +93,13 @@
     // complianceNewExplorer.js, which this page doesn't load.
     var byFolderCompany = 0;
     var mbxExamCanWrite = true;
-    var mbxExamRole = "";   // "Assignee" | "Assigner" (server-decided, sql/020)
+    var mbxExamRole = "";   // "Assignee" | "Assigner" | "Viewer" (server-decided, sql/020 + 026)
 
     // The management view asks isDownstream(xcid) (global.js), which reads CMSNEO's
     // access-tree tier data this page doesn't load. The server has already checked
     // that the assigner's company tree reaches the examined company (MBX_GetExamAccess),
     // so answer from that.
-    function isDownstream(xCID) { return mbxExamRole === "Assigner"; }
+    function isDownstream(xCID) { return mbxExamRole === "Assigner" || mbxExamRole === "Viewer"; }
 
     // Clicks inside this frame reset the mailbox's idle timeout (see index.html).
     document.addEventListener("click", function () {
@@ -200,7 +200,9 @@
             document.getElementById("mbxReadOnlyBanner").style.display = "block";
           }
           document.getElementById("mbxLoadingBanner").style.display = "none";
-          if (mbxExamRole === "Assigner") {
+          // Viewer = a colleague the task is shared with read-only (sql/026): the same
+          // management view, with no writes (CanWrite is 0, and the server refuses them).
+          if (mbxExamRole === "Assigner" || mbxExamRole === "Viewer") {
             // The management view of a downstream company's exam — exactly how CMSNEO's
             // Documents page opens it (scoring and audit layers included).
             byFolderCompany = 1;

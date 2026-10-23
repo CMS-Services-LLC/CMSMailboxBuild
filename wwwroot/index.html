@@ -170,6 +170,7 @@
                     <li><b>Firefox:</b> menu &#9776; &rarr; Passwords</li>
                     <li><b>A password manager app</b> (1Password, LastPass, Bitwarden, ...): search it for cms-services</li>
                 </ul>
+                <p><b>Already signed in to CMS?</b> You can open the Secure Mailbox from there without signing in again: open <b>Mailbox</b> in CMS's left menu and click <b>Secure Mailbox</b> at the bottom of the folder list.</p>
                 <p>Still can't find it? Ask your company's CMS administrator to reset your password, or contact CMS Services at <a href="mailto:info@cms-services.net">info@cms-services.net</a>.</p>
             </div>
         </div>
@@ -470,6 +471,138 @@
         // show only under All.
         var folderRows = [];
 
+        // ---- Sharing a task you were assigned (sql/028, TaskController) ---------------
+        // Colleagues in your own company who hold the task's permission: Manage = work on it
+        // as you can, Read only = follow it. Changes are held here until Save, which applies
+        // them one at a time; Cancel discards them. The server checks you're the assignee.
+        var taskShare = null;   // { taskId, orig: {uid: access}, cur: {uid: access}, names: {uid: name}, candidates: [uid] }
+
+        function openTaskShare(taskId) {
+            closeTaskShare();
+            var ov = document.createElement("div");
+            ov.id = "taskShareOverlay";
+            ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.35);z-index:10000;display:flex;align-items:center;justify-content:center";
+            ov.innerHTML = "<div style='background:#fff;border-radius:6px;width:780px;max-width:94%;min-height:420px;max-height:85vh;display:flex;flex-direction:column;padding:18px 22px;box-shadow:0 4px 16px rgba(0,0,0,0.3);font-size:14px'>" +
+                "<b style='margin-bottom:6px'>Share this task</b>" +
+                "<p class='hint'>Give colleagues in your company access to this task. <b>Manage</b>: work on it as you can (fill in the form, upload the report, answer the exam). <b>Read only</b>: open it and follow its status. Only people with this task's permission are listed.</p>" +
+                "<div style='flex:1;overflow-y:auto'><div id='taskShareList'><p class='hint'>Loading...</p></div>" +
+                "<div id='taskShareAdd' style='display:flex;gap:6px;align-items:center;margin-top:10px'></div></div>" +
+                "<div class='err' id='taskShareErr'></div>" +
+                "<div style='display:flex;justify-content:flex-end;gap:8px;border-top:1px solid #e0e8f2;padding-top:10px;margin-top:10px'>" +
+                "<button class='secondary' style='width:auto' onclick='closeTaskShare()'>Cancel</button>" +
+                "<button class='primary' style='width:auto' id='taskShareSaveBtn' onclick='saveTaskShares()'>Save</button></div></div>";
+            document.body.appendChild(ov);
+
+            taskShare = { taskId: taskId, orig: {}, cur: {}, names: {}, candidates: [] };
+            api("/task/" + taskId + "/shares")
+                .then(function (r) { if (r.status === 401) { logout(); throw new Error("unauthorized"); } if (!r.ok) throw new Error("refused"); return r.json(); })
+                .then(function (res) {
+                    if (!taskShare || taskShare.taskId !== taskId) return;
+                    res.shares.forEach(function (sh) {
+                        taskShare.orig[sh.UID] = sh.Access;
+                        taskShare.cur[sh.UID] = sh.Access;
+                        taskShare.names[sh.UID] = sh.Name;
+                    });
+                    res.candidates.forEach(function (c) { taskShare.names[c.UID] = c.Name; });
+                    taskShare.candidates = res.candidates.map(function (c) { return c.UID; });
+                    renderTaskShares();
+                })
+                .catch(function () {
+                    var list = document.getElementById("taskShareList");
+                    if (list) list.innerHTML = "<p class='err'>Sharing isn't available for this task.</p>";
+                });
+        }
+
+        function closeTaskShare(refresh) {
+            var ov = document.getElementById("taskShareOverlay");
+            if (ov) ov.parentNode.removeChild(ov);
+            taskShare = null;
+            if (refresh && currentMessageId) refreshTaskCards();
+        }
+
+        function accessSelect(value) {
+            return "<select>" +
+                "<option value='manage'" + (value === "manage" ? " selected" : "") + ">Manage</option>" +
+                "<option value='read'" + (value !== "manage" ? " selected" : "") + ">Read only</option></select>";
+        }
+
+        // Draws the window from taskShare.cur (who will have access once saved).
+        function renderTaskShares() {
+            var st = taskShare;
+            var list = document.getElementById("taskShareList");
+            var add = document.getElementById("taskShareAdd");
+            if (!st || !list) return;
+            var uids = Object.keys(st.cur);
+            var removed = Object.keys(st.orig).filter(function (uid) { return !(uid in st.cur); });
+            list.innerHTML = (uids.length ? "" : "<p class='hint'>Not shared with anyone.</p>") +
+                (removed.length ? "<p class='hint' style='color:#b91c1c'>" + escapeHtml(removed.map(function (uid) { return st.names[uid]; }).join(", ")) + " will lose access when you click Save.</p>" : "");
+            uids.forEach(function (uid) {
+                var row = document.createElement("div");
+                row.style.cssText = "display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #eee";
+                row.innerHTML = "<span style='flex:1'>" + escapeHtml(st.names[uid]) + (st.orig[uid] ? "" : " <span class='hint'>(new)</span>") + "</span>" +
+                    accessSelect(st.cur[uid]) +
+                    " <button title='Takes away this person&#39;s access when you click Save' style='width:auto;background:#fff;color:#b91c1c;border:1px solid #e3a3a3;border-radius:3px;padding:3px 10px;cursor:pointer'>Remove access</button>";
+                row.querySelector("select").onchange = function () { st.cur[uid] = this.value; };
+                row.querySelector("button").onclick = function () { delete st.cur[uid]; renderTaskShares(); };
+                list.appendChild(row);
+            });
+
+            // Anyone who could be added: current candidates plus anyone removed in this session.
+            var addable = st.candidates.concat(Object.keys(st.orig).map(Number)).filter(function (uid, ix, a) {
+                return a.indexOf(uid) === ix && !(uid in st.cur);
+            });
+            if (!addable.length) {
+                add.innerHTML = "<p class='hint'>No one else in your company has this task's permission.</p>";
+                return;
+            }
+            add.innerHTML = "<select id='taskShareWho' style='flex:1'><option value=''>-- Add a colleague --</option>" +
+                addable.map(function (uid) { return "<option value='" + uid + "'>" + escapeHtml(st.names[uid]) + "</option>"; }).join("") +
+                "</select>" + accessSelect("read").replace("<select>", "<select id='taskShareAccess'>") +
+                "<button class='secondary' style='width:auto' id='taskShareAddBtn'>Add</button>";
+            document.getElementById("taskShareAddBtn").onclick = function () {
+                var who = document.getElementById("taskShareWho").value;
+                if (!who) { document.getElementById("taskShareErr").innerText = "Choose a colleague."; return; }
+                document.getElementById("taskShareErr").innerText = "";
+                st.cur[who] = document.getElementById("taskShareAccess").value;
+                renderTaskShares();
+            };
+        }
+
+        // Applies the differences between orig and cur, one request at a time, then closes.
+        function saveTaskShares() {
+            var st = taskShare;
+            if (!st) return;
+            var changes = [];
+            Object.keys(st.cur).forEach(function (uid) { if (st.orig[uid] !== st.cur[uid]) changes.push([uid, st.cur[uid]]); });
+            Object.keys(st.orig).forEach(function (uid) { if (!(uid in st.cur)) changes.push([uid, "none"]); });
+            if (!changes.length) { closeTaskShare(); return; }
+
+            var btn = document.getElementById("taskShareSaveBtn");
+            btn.disabled = true;
+            document.getElementById("taskShareErr").innerText = "";
+            var chain = Promise.resolve();
+            changes.forEach(function (c) {
+                chain = chain.then(function () {
+                    return api("/task/" + st.taskId + "/share", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ ShareUid: parseInt(c[0], 10), Access: c[1] })
+                    })
+                        .then(function (r) { if (!r.ok) throw new Error(st.names[c[0]] + ": refused"); return r.json(); })
+                        .then(function (res) {
+                            if (res.status !== "ok") throw new Error(st.names[c[0]] + ": " + (res.status === "not_allowed"
+                                ? "they must be in your company and have this task's permission" : res.status));
+                        });
+                });
+            });
+            chain
+                .then(function () { closeTaskShare(true); })
+                .catch(function (ex) {
+                    btn.disabled = false;
+                    document.getElementById("taskShareErr").innerText = "Not everything was saved. " + ex.message;
+                });
+        }
+
         function toggleForgotHelp() {
             var help = document.getElementById("forgotHelp");
             help.style.display = help.style.display === "block" ? "none" : "block";
@@ -516,6 +649,7 @@
                 var tag = m.TaskState
                     ? "<span class='taskTag " + m.TaskState + "'>" + (m.TaskState === "Pending" ? "Tasks pending" : m.TaskState === "Completed" ? "Tasks completed" : "Tasks cancelled") + "</span>"
                     : "";
+                if (m.IsShared) tag += "<span class='taskTag Cancelled' title='A colleague shared a task in this message with you'>Shared with you</span>";
                 div.innerHTML = "<span class='subj'>" + escapeHtml(m.Subject) + tag + "</span>" +
                     "<span class='meta'>" + who + " &middot; " +
                     new Date(m.DTCreated).toLocaleString() + "</span>";
@@ -593,12 +727,27 @@
             // (IaViewerController/ItemController) requires being a recipient.
             var isRecipient = !!msg.IsRecipient;
             currentArchived = !!msg.IsArchived;
+            // A colleague the assignee shared a task with (sql/028): they get the recipient's
+            // view of just that task (the server sends only its item), without reply or archive.
+            var assigneeShare = msg.AssigneeSharedAccess || "";
+            var worksAsRecipient = isRecipient || !!assigneeShare;
 
             var html = "<div id='messageScroll'>";
             html += "<h3>" + escapeHtml(msg.Subject) + "</h3>";
-            html += isRecipient
+            html += worksAsRecipient
                 ? "<p class='hint'>From " + escapeHtml(msg.FromName) + " (" + escapeHtml(msg.FromCompany) + ") &middot; " + new Date(msg.DTCreated).toLocaleString() + "</p>"
                 : "<p class='hint'>To " + escapeHtml(msg.ToNames || "") + " &middot; " + new Date(msg.DTCreated).toLocaleString() + "</p>";
+            // A colleague a task here was shared with (sql/026): they see it as its sender does.
+            if (msg.SharedAccess) {
+                html += "<div class='taskBanner' style='padding:6px 10px;margin-bottom:8px;border-radius:3px;background:#eef2f7;color:#334155'>" +
+                    "Shared with you by " + escapeHtml(msg.FromName) + " &middot; <b>" + (msg.SharedAccess === "manage" ? "Manage" : "Read only") + "</b>" +
+                    (msg.SharedAccess === "manage" ? " (you can review this task as " + escapeHtml(msg.FromName) + " would)" : "") + "</div>";
+            }
+            if (assigneeShare) {
+                html += "<div class='taskBanner' style='padding:6px 10px;margin-bottom:8px;border-radius:3px;background:#eef2f7;color:#334155'>" +
+                    "A colleague shared this task with you &middot; <b>" + (assigneeShare === "manage" ? "Manage" : "Read only") + "</b>" +
+                    (assigneeShare === "manage" ? " (you can work on it)" : " (you can follow it)") + "</div>";
+            }
             html += "<p>" + escapeHtml(msg.Body || "").replace(/\n/g, "<br/>") + "</p>";
             html += "<div id='itemsArea'></div>";
             html += "</div>";
@@ -621,7 +770,7 @@
                 card.className = "itemCard";
                 // Lets refreshTaskCards() find this item's card again.
                 card.setAttribute("data-item-id", item.MessageItemID);
-                if (!isRecipient) {
+                if (!worksAsRecipient) {
                     // In Sent — see senderCardHtml().
                     card.setAttribute("data-sender-view", "1");
                     card.setAttribute("data-task-status", item.TaskStatus || "");
@@ -641,6 +790,13 @@
                     // A task item that hasn't been started (ItemID "0") opens
                     // ia-viewer.html in new-record mode — same page, same URL; the
                     // server decides the mode from the item itself.
+                    if (String(item.ItemID) === "0" && item.TaskID && !item.IsMyTask && item.TaskStatus !== "Cancelled") {
+                        // Not started yet, and this viewer can follow it but not work on it (sql/028).
+                        card.innerHTML = taskBanner(item) + "<strong>" + escapeHtml(item.ItemLabel || "Form Application Record") + "</strong>" +
+                            "<p class='hint'>This form hasn't been started yet. You can follow it here once it's saved.</p>";
+                        itemsArea.appendChild(card);
+                        return;
+                    }
                     if (item.TaskStatus === "Cancelled" && String(item.ItemID) === "0") {
                         // Cancelled before the record was started (sql/021): nothing to open.
                         card.innerHTML = taskBanner(item) + "<strong>" + escapeHtml(item.ItemLabel || "Form Application Record") + "</strong>" +
@@ -661,7 +817,7 @@
                     // Exam task (sql/019): CMSNEO's own exam viewer, ported into
                     // exam-viewer.html and gated by IaViewerController.Exam.cs.
                     card.setAttribute("data-task-status", item.TaskStatus || "");
-                    card.innerHTML = taskBanner(item) + examFrameHtml(item, item.IsMyTask);
+                    card.innerHTML = taskBanner(item) + examFrameHtml(item, item.IsMyTask || !!assigneeShare);
                     itemsArea.appendChild(card);
                 } else if (item.ItemType === "ExamRef") {
                     // A reply's copy of an exam task (sql/020): the same exam, opened
@@ -779,7 +935,7 @@
         function drCardHtml(item) {
             var html = taskBanner(item) + "<strong>" + escapeHtml(item.ItemLabel || "Dynamic Report") + "</strong><div style='margin-top:8px'>";
             if (!item.IsMyTask) {
-                html += "<p class='hint'>This task is assigned to someone else.</p>";
+                html += "<p class='hint'>Only the assignee, or a colleague they gave Manage access, can upload this report. You can follow it here.</p>";
             } else {
                 html += "<button class='secondary' onclick='downloadDRTemplate(" + item.MessageItemID + ")'>Download template</button>";
                 if (item.TaskStatus === "Cancelled") {
@@ -857,9 +1013,13 @@
             // DueDate is a SQL date (serialized as midnight) — show the date part as-is
             // rather than letting a timezone conversion shift it a day.
             var due = (item.DueDate && !cancelled) ? " &middot; Due " + escapeHtml(String(item.DueDate).substring(0, 10)) : "";
+            // The task's own assignee can share it with colleagues in their company (sql/028).
+            var share = (item.IsAssigneeOwner && !cancelled)
+                ? " <a style='float:right;cursor:pointer;color:#2c6bd6;font-weight:normal' onclick='openTaskShare(" + item.TaskID + ")'>Share with a colleague</a>"
+                : "";
             return "<div class='taskBanner' style='padding:6px 10px;margin-bottom:8px;border-radius:3px;" +
                 (cancelled ? "background:#f1f3f4;color:#5f6368" : done ? "background:#e6f4ea;color:#1e6b34" : pending ? "background:#e8f0fe;color:#1a4a9c" : "background:#fff4e0;color:#8a5300") + "'>" +
-                "<b>Task:</b> " + what + due + " &middot; <b>" + statusText + "</b></div>";
+                share + "<b>Task:</b> " + what + due + " &middot; <b>" + statusText + "</b></div>";
         }
 
         // ---- Dynamic Report viewer (sql/010, DRViewController) ----------------
