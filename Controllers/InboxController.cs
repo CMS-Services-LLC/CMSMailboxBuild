@@ -102,6 +102,10 @@ namespace CMSMailbox.Controllers
                 return BadRequest();
             }
 
+            // sql/029: email the reply's recipients (link only), as for a new message.
+            if (int.TryParse(dat.Rows[0]["MessageID"]?.ToString(), out int newId))
+                ComposeController.NotifyRecipients(uid, newId);
+
             return Ok(JsonConvert.SerializeObject(dat));
         }
     }

@@ -143,6 +143,15 @@ John didn't pick from the design options, so these are the defaults and can chan
 
 Next checks every earlier step and stops at the first incomplete one. Nothing changed server-side: every input is built once and only hidden or shown, so candidate loading, validation and SubmitAssignTask are unchanged.
 
+## Phase 6: attachments and new messages (built 2026-10-23, untested, sql/029 not run)
+
+John's choices: attach from **mailbox replies** and **new messages composed in the mailbox**; **25 MB per file, 10 per message**, common types only (PDF, Office, images, text, CSV, ZIP); downloadable by the **sender, recipients and colleagues a task on the message was shared with**; new messages can go to **anyone in the sender's CMS network**; **new messages and replies email the recipients** (link only, like CMS's).
+- **Mailbox:** "✉ New" next to the folder tabs opens a compose form (To with search, subject, message, attach). The reply box has "📎 Attach". A message shows its attachments above its items; clicking one downloads it.
+- **Server** (`ComposeController`): new messages re-check recipients against `MBX_GetComposeRecipients` (neousers, real accounts). Uploads go one file per request, right after sending; `MBX_AddAttachment` allows only the message's author, within an hour, at most 10. The content type comes from the extension (never the browser's claim), and downloads are always `attachment` + `nosniff`.
+- **Emails:** `Mail.SendNewMessageNotification`, sent by the mailbox itself with the same no-reply account CMS uses, for new messages and replies. A recipient who has never activated the mailbox gets the plain notification, not CMS's activation email.
+
+- **Conversation view** (added 2026-10-23, sql/030): opening any message shows the whole thread (`MBX_GetThread` follows ReplyToMessageID up to the first message and down through every reply). Each message the viewer can read is a card, oldest first, with sender → recipients, date, text and attachments; the opened one is highlighted. Its tasks and the reply box stay below as before.
+
 ## Phase 7: shared task access (built 2026-10-23, untested, sql/026 not run)
 
 John's choices: shares are made per task from **Track Assigned Tasks**; colleagues must be **in my company** and **hold the task's permission**; access is **Manage** or **Read only**.

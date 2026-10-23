@@ -69,6 +69,23 @@
         #messagePane { flex: 1; display: flex; flex-direction: column; height: 100%; min-width: 0; }
         #messageScroll { flex: 0 1 auto; min-height: 0; padding: 20px; overflow-y: auto; }
         #replyBox { flex-shrink: 0; padding: 12px 20px; background: #fff; }
+        /* Attachments (sql/029) */
+        .attachPick { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; color: #2c6bd6; font-size: 13px; margin-right: 8px; }
+        .attachChips { display: inline; font-size: 12px; color: #444; }
+        .attachChip { display: inline-block; background: #eef2f7; border-radius: 3px; padding: 1px 6px; margin: 2px 4px 2px 0; }
+        .attachChip a { color: #b91c1c; cursor: pointer; margin-left: 4px; text-decoration: none; }
+        /* The conversation (sql/030): one card per message, oldest first */
+        #threadArea { margin: 6px 0 14px; }
+        .threadMsg { border: 1px solid #e3e8f0; border-left: 4px solid #e3e8f0; border-radius: 4px; padding: 8px 12px; margin-bottom: 8px; background: #fff; }
+        .threadMsg.current { border-left-color: #2c6bd6; background: #f7faff; }
+        .threadMsg.mine { background: #fbfcfe; }
+        .threadMsg .tmHead { font-size: 12px; color: #6b7280; margin-bottom: 4px; }
+        .threadMsg .tmHead b { color: #1f2937; }
+        .threadMsg .tmBody { white-space: normal; }
+        #threadArea .attFile { display: inline-flex; align-items: center; gap: 6px; border: 1px solid #dde3ec; border-radius: 4px; padding: 4px 8px; margin: 0 6px 6px 0; font-size: 13px; cursor: pointer; color: #1f2937; background: #fbfcfe; }
+        #threadArea .attFile:hover { background: #eef4ff; }
+        #composeTo { border: 1px solid #ccc; border-radius: 4px; max-height: 180px; overflow-y: auto; padding: 4px 6px; }
+        #composeTo label { display: block; font-size: 13px; padding: 2px 0; cursor: pointer; }
         .itemCard { border: 1px solid #ddd; border-radius: 4px; padding: 10px; margin: 8px 0; background: #fff; }
         /* Dynamic Report viewer (drView*) — see loadDRReport()/openDRRow(). */
         .drTableWrap { max-height: 300px; overflow: auto; border: 1px solid #ddd; margin-top: 8px; }
@@ -199,6 +216,7 @@
                     <button id="tab_inbox" class="active" onclick="setFolder('inbox')">Inbox</button>
                     <button id="tab_sent" onclick="setFolder('sent')">Sent</button>
                     <button id="tab_archived" onclick="setFolder('archived')">Archived</button>
+                    <button id="newMsgBtn" title="New message" style="flex:0 0 auto;padding:10px 12px;color:#2c6bd6" onclick="openCompose()">&#9993; New</button>
                     <button id="refreshBtn" title="Refresh messages" onclick="refreshMailbox()">&#8635;</button>
                 </div>
                 <div id="searchBox">
@@ -603,6 +621,222 @@
                 });
         }
 
+        // ---- Attachments and new messages (Phase 6, sql/029, ComposeController) --------
+        // Files are picked here, the message (or reply) is sent, then each file is uploaded to
+        // it, one per request. Limits are checked here for a quick answer and again server-side.
+        var ATTACH_MAX_BYTES = 25 * 1024 * 1024, ATTACH_MAX_COUNT = 10;
+        var ATTACH_TYPES = [".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".png", ".jpg", ".jpeg", ".gif", ".txt", ".csv", ".zip"];
+        var pickedFiles = { reply: [], compose: [] };
+
+        function addPickedFiles(input, which) {
+            var errs = [];
+            Array.prototype.forEach.call(input.files, function (f) {
+                var ext = (f.name.match(/\.[^.]+$/) || [""])[0].toLowerCase();
+                if (ATTACH_TYPES.indexOf(ext) === -1) errs.push(f.name + ": that file type isn't allowed");
+                else if (f.size > ATTACH_MAX_BYTES) errs.push(f.name + ": larger than 25 MB");
+                else if (f.size === 0) errs.push(f.name + ": empty file");
+                else if (pickedFiles[which].length >= ATTACH_MAX_COUNT) errs.push(f.name + ": at most " + ATTACH_MAX_COUNT + " files");
+                else pickedFiles[which].push(f);
+            });
+            input.value = "";
+            renderPickedFiles(which);
+            var err = document.getElementById(which === "reply" ? "replyError" : "composeError");
+            if (err) err.innerText = errs.join("; ");
+        }
+
+        function renderPickedFiles(which) {
+            var el = document.getElementById(which === "reply" ? "replyFiles" : "composeFiles");
+            if (!el) return;
+            el.innerHTML = "";
+            pickedFiles[which].forEach(function (f, ix) {
+                var chip = document.createElement("span");
+                chip.className = "attachChip";
+                chip.textContent = f.name + " (" + fileSizeText(f.size) + ")";
+                var x = document.createElement("a");
+                x.innerHTML = "&times;";
+                x.title = "Remove";
+                x.onclick = function () { pickedFiles[which].splice(ix, 1); renderPickedFiles(which); };
+                chip.appendChild(x);
+                el.appendChild(chip);
+            });
+        }
+
+        function fileSizeText(n) {
+            return n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB";
+        }
+
+        var ATTACH_ERRORS = {
+            not_allowed: "attachments can only be added right after sending",
+            too_many: "a message can have at most 10 attachments",
+            too_large: "larger than 25 MB",
+            type_not_allowed: "that file type isn't allowed",
+            empty_file: "empty file"
+        };
+
+        // Uploads files to a message the caller just sent, one at a time. Resolves with a list
+        // of "name: reason" for the ones that failed.
+        function uploadAttachments(messageId, files) {
+            var failed = [];
+            var chain = Promise.resolve();
+            files.forEach(function (f) {
+                chain = chain.then(function () {
+                    var fd = new FormData();
+                    fd.append("file", f, f.name);
+                    return api("/inbox/" + messageId + "/attachments", { method: "POST", body: fd })
+                        .then(function (r) { return r.ok ? r.json() : { status: "error" }; })
+                        .then(function (res) { if (res.status !== "ok") failed.push(f.name + ": " + (ATTACH_ERRORS[res.status] || res.status)); })
+                        .catch(function () { failed.push(f.name + ": upload failed"); });
+                });
+            });
+            return chain.then(function () { return failed; });
+        }
+
+        // One message of the conversation: who, to whom, when, the text, and its attachments.
+        function threadCardHtml(m, atts, isCurrent) {
+            var html = "<div class='threadMsg" + (isCurrent ? " current" : "") + (m.FromMe ? " mine" : "") + "' data-thread-id='" + m.MessageID + "'>" +
+                "<div class='tmHead'><b>" + escapeHtml(m.FromMe ? "You" : m.FromName) + "</b>" +
+                (m.FromMe ? "" : " (" + escapeHtml(m.FromCompany || "") + ")") +
+                " &rarr; " + escapeHtml(m.ToNames || "") + " &middot; " + new Date(m.DTCreated).toLocaleString() +
+                (isCurrent ? " &middot; <i>this message</i>" : "") + "</div>" +
+                "<div class='tmBody'>" + (escapeHtml(m.Body || "").replace(/\n/g, "<br/>") || "<span class='hint'>(no text)</span>") + "</div>";
+            if (atts.length) {
+                html += "<div style='margin-top:6px'>" + atts.map(function (a) {
+                    return "<span class='attFile' title='Download' onclick='downloadAttachment(" + a.AttachmentID + ", " +
+                        escapeHtml(JSON.stringify(a.FileName)) + ")'>&#128206; " + escapeHtml(a.FileName) + " (" + fileSizeText(a.SizeBytes) + ")</span>";
+                }).join("") + "</div>";
+            }
+            return html + "</div>";
+        }
+
+        function loadThread(messageId) {
+            api("/inbox/" + messageId + "/thread")
+                .then(function (r) { if (!r.ok) throw new Error("no thread"); return r.json(); })
+                .then(function (res) {
+                    if (messageId !== currentMessageId) return;
+                    var area = document.getElementById("threadArea");
+                    if (!area) return;
+                    var msgs = JSON.parse(res.messages), atts = JSON.parse(res.attachments);
+                    area.innerHTML = (msgs.length > 1 ? "<div class='hint' style='margin-bottom:6px'>Conversation &middot; " + msgs.length + " messages</div>" : "") +
+                        msgs.map(function (m) {
+                            return threadCardHtml(m, atts.filter(function (a) { return a.MessageID === m.MessageID; }), m.MessageID === messageId);
+                        }).join("");
+                    var cur = area.querySelector(".threadMsg.current");
+                    if (cur && msgs.length > 1) cur.scrollIntoView({ block: "nearest" });
+                })
+                .catch(function () { /* the opened message alone stays shown */ });
+        }
+
+        function downloadAttachment(id, name) {
+            api("/attachment/" + id)
+                .then(function (r) { if (r.status === 401) { logout(); throw new Error("unauthorized"); } if (!r.ok) throw new Error("not found"); return r.blob(); })
+                .then(function (blob) {
+                    var url = URL.createObjectURL(blob);
+                    var a = document.createElement("a");
+                    a.href = url;
+                    a.download = name;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
+                })
+                .catch(function () { alert("That attachment couldn't be downloaded."); });
+        }
+
+        // New message: to anyone in your CMS network (the server re-checks the list on send).
+        var composeRecipients = [];
+        function openCompose() {
+            currentMessageId = null;
+            markSelectedRow();
+            pickedFiles.compose = [];
+            document.getElementById("messagePane").innerHTML =
+                "<div id='messageScroll'><h3>New secure message</h3>" +
+                "<label class='hint'>To</label><input id='composeFilter' placeholder='Search people...' style='width:100%;padding:6px;margin:4px 0;box-sizing:border-box' oninput='renderComposeTo()' />" +
+                "<div id='composeTo'><p class='hint'>Loading...</p></div>" +
+                "<div class='hint' id='composeToSummary' style='margin:4px 0 10px'></div>" +
+                "<label class='hint'>Subject</label><input id='composeSubject' style='width:100%;padding:6px;margin:4px 0 10px;box-sizing:border-box' />" +
+                "<label class='hint'>Message</label><textarea id='composeBody' rows='8' style='width:100%;padding:6px;margin:4px 0;box-sizing:border-box'></textarea>" +
+                "<div style='margin:4px 0 10px'><label class='attachPick'>&#128206; Attach files<input type='file' multiple style='display:none' onchange='addPickedFiles(this, \"compose\")' /></label>" +
+                "<span class='attachChips' id='composeFiles'></span></div>" +
+                "<div class='err' id='composeError'></div>" +
+                "<button class='primary' id='composeSendBtn' style='width:auto' onclick='sendCompose()'>Send</button> " +
+                "<button class='secondary' style='width:auto' onclick='closeCompose()'>Cancel</button></div>";
+            api("/inbox/compose-recipients")
+                .then(function (r) { if (r.status === 401) { logout(); throw new Error("unauthorized"); } return r.json(); })
+                .then(function (txt) {
+                    composeRecipients = (typeof txt === "string" ? JSON.parse(txt) : txt).map(function (u) { u.checked = false; return u; });
+                    renderComposeTo();
+                })
+                .catch(function () { var el = document.getElementById("composeTo"); if (el) el.innerHTML = "<p class='err'>Couldn't load the people you can write to.</p>"; });
+        }
+
+        function renderComposeTo() {
+            var box = document.getElementById("composeTo");
+            if (!box) return;
+            var q = (document.getElementById("composeFilter").value || "").trim().toLowerCase();
+            box.innerHTML = "";
+            var shown = composeRecipients.filter(function (u) {
+                return u.checked || !q || [u.Name, u.Email, u.Company].join(" ").toLowerCase().indexOf(q) > -1;
+            });
+            if (!shown.length) box.innerHTML = "<p class='hint'>No one matches.</p>";
+            shown.forEach(function (u) {
+                var l = document.createElement("label");
+                var cb = document.createElement("input");
+                cb.type = "checkbox";
+                cb.checked = u.checked;
+                cb.onchange = function () { u.checked = cb.checked; renderComposeSummary(); };
+                l.appendChild(cb);
+                l.appendChild(document.createTextNode(" " + u.Name + " (" + (u.Company || "") + ")"));
+                box.appendChild(l);
+            });
+            renderComposeSummary();
+        }
+
+        function renderComposeSummary() {
+            var picked = composeRecipients.filter(function (u) { return u.checked; });
+            var el = document.getElementById("composeToSummary");
+            if (el) el.textContent = picked.length ? "To: " + picked.map(function (u) { return u.Name; }).join(", ") : "Choose at least one person.";
+        }
+
+        function closeCompose() {
+            pickedFiles.compose = [];
+            document.getElementById("messagePane").innerHTML = EMPTY_PANE_HTML;
+        }
+
+        function sendCompose() {
+            var err = document.getElementById("composeError");
+            var to = composeRecipients.filter(function (u) { return u.checked; }).map(function (u) { return u.UID; });
+            var subject = document.getElementById("composeSubject").value.trim();
+            if (!to.length) { err.innerText = "Choose at least one person."; return; }
+            if (!subject) { err.innerText = "Enter a subject."; return; }
+            var btn = document.getElementById("composeSendBtn");
+            btn.disabled = true;
+            err.innerText = "";
+            api("/inbox/compose", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ToUIDs: to, Subject: subject, Body: document.getElementById("composeBody").value })
+            })
+                .then(function (r) { if (r.status === 401) { logout(); throw new Error("unauthorized"); } return r.json(); })
+                .then(function (res) {
+                    if (res.status !== "ok") {
+                        btn.disabled = false;
+                        err.innerText = { recipient_not_allowed: "One of those people can't be messaged from your account.", subject_required: "Enter a subject.", recipients_required: "Choose at least one person." }[res.status] || "The message couldn't be sent.";
+                        return;
+                    }
+                    var files = pickedFiles.compose;
+                    var done = function (failed) {
+                        pickedFiles.compose = [];
+                        setFolder("sent");
+                        openMessage(res.messageId);
+                        if (failed && failed.length) alert("The message was sent, but these attachments failed:\n" + failed.join("\n"));
+                    };
+                    if (!files.length) { done([]); return; }
+                    err.innerText = "Sent. Uploading " + files.length + " attachment(s)...";
+                    uploadAttachments(res.messageId, files).then(done);
+                })
+                .catch(function () { btn.disabled = false; err.innerText = "The message couldn't be sent."; });
+        }
+
         function toggleForgotHelp() {
             var help = document.getElementById("forgotHelp");
             help.style.display = help.style.display === "block" ? "none" : "block";
@@ -734,9 +968,6 @@
 
             var html = "<div id='messageScroll'>";
             html += "<h3>" + escapeHtml(msg.Subject) + "</h3>";
-            html += worksAsRecipient
-                ? "<p class='hint'>From " + escapeHtml(msg.FromName) + " (" + escapeHtml(msg.FromCompany) + ") &middot; " + new Date(msg.DTCreated).toLocaleString() + "</p>"
-                : "<p class='hint'>To " + escapeHtml(msg.ToNames || "") + " &middot; " + new Date(msg.DTCreated).toLocaleString() + "</p>";
             // A colleague a task here was shared with (sql/026): they see it as its sender does.
             if (msg.SharedAccess) {
                 html += "<div class='taskBanner' style='padding:6px 10px;margin-bottom:8px;border-radius:3px;background:#eef2f7;color:#334155'>" +
@@ -748,7 +979,12 @@
                     "A colleague shared this task with you &middot; <b>" + (assigneeShare === "manage" ? "Manage" : "Read only") + "</b>" +
                     (assigneeShare === "manage" ? " (you can work on it)" : " (you can follow it)") + "</div>";
             }
-            html += "<p>" + escapeHtml(msg.Body || "").replace(/\n/g, "<br/>") + "</p>";
+            // The conversation (sql/030): starts as just this message, then loadThread() fills in
+            // the rest of the thread around it.
+            html += "<div id='threadArea'>" + threadCardHtml({
+                MessageID: msg.MessageID, FromName: msg.FromName, FromCompany: msg.FromCompany,
+                ToNames: msg.ToNames, DTCreated: msg.DTCreated, Body: msg.Body, FromMe: !worksAsRecipient && !msg.SharedAccess
+            }, [], true) + "</div>";
             html += "<div id='itemsArea'></div>";
             html += "</div>";
             // Deliberately OUTSIDE #messageScroll, as a fixed sibling — see the
@@ -757,12 +993,16 @@
                 html += "<div id='replyBox'>" +
                     "<input id='replySubject' placeholder='Subject' value='Re: " + escapeHtml(msg.Subject) + "' />" +
                     "<textarea id='replyBody' placeholder='Message' rows='4' oninput='updateReplyButton()'></textarea>" +
+                    "<div style='margin:4px 0'><label class='attachPick'>&#128206; Attach<input type='file' multiple style='display:none' onchange='addPickedFiles(this, \"reply\")' /></label>" +
+                    "<span class='attachChips' id='replyFiles'></span></div>" +
                     "<div class='err' id='replyError'></div>" +
                     "<button class='primary' id='replySendBtn' onclick='sendReply()' disabled>Send Reply</button> " +
                     "<button class='secondary' onclick='archiveCurrent()'>" + (currentArchived ? "Move to Inbox" : "Archive") + "</button>" +
                     "</div>";
             }
             pane.innerHTML = html;
+            pickedFiles.reply = [];
+            loadThread(msg.MessageID);
 
             var itemsArea = document.getElementById("itemsArea");
             items.forEach(function (item) {
@@ -1434,11 +1674,21 @@
                     if (!r.ok) throw new Error("failed");
                     return r.text();
                 })
-                .then(function () {
+                .then(function (txt) {
+                    // The new reply's MessageID, for its attachments (sql/029).
+                    var rows = []; try { rows = JSON.parse(txt); if (typeof rows === "string") rows = JSON.parse(rows); } catch (e) { }   // Ok(serialized table) arrives JSON-encoded twice
+                    var newId = rows.length ? rows[0].MessageID : null;
+                    var files = pickedFiles.reply || [];
                     document.getElementById("replyBody").value = "";
                     updateReplyButton();
-                    loadInbox();
-                    errDiv.innerText = "Reply sent.";
+                    if (!newId || !files.length) { errDiv.innerText = "Reply sent."; loadInbox(); return; }
+                    errDiv.innerText = "Reply sent. Uploading " + files.length + " attachment(s)...";
+                    return uploadAttachments(newId, files).then(function (failed) {
+                        pickedFiles.reply = [];
+                        renderPickedFiles("reply");
+                        errDiv.innerText = failed.length ? "Reply sent, but these attachments failed: " + failed.join("; ") : "Reply sent with " + files.length + " attachment(s).";
+                        loadInbox();
+                    });
                 })
                 .catch(function () { errDiv.innerText = "Could not send reply."; });
         }
