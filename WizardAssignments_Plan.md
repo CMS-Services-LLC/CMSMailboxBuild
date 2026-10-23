@@ -114,15 +114,29 @@ From the CMSNEO dashboard, a management-company user opens a window from "What w
 
 **Re-syncing after an exam change in CMS:** copy `CMS/wwwroot/js/managementExamsNEW.js` (the committed version) over `CMSMailbox/wwwroot/js/managementExamsNEW.js`. Nothing in it is patched. Copy any new images it references (`icon=...png`) from `CMS/wwwroot/images` to `CMSMailbox/wwwroot/images`. Then check that `exam-viewer.html`'s overrides still match: `MGTUploadDocs`, `MGTPopDocs`, `reportLoadFiles`, `ftnGetCMSFiles`, `refreshOFiles`, `buildAvailExams`, and the CSS hides. If the viewer starts calling a new exam proc, add it to `ExamReadActions` or `ExamWriteActions` in `IaViewerController.Exam.cs`, with a pin or ownership check if it takes an answer or file ID.
 
-## After the phases (requested 2026-10-22)
+## Phase 4: Tracking (built 2026-10-23, untested, sql/021 not run)
 
-- **File attachments on secure messages**, separate from tasks: let a sender attach their own files to a secure email, alongside or instead of tasks. John asked for this once Phases 3 and 4 are done.
+John didn't pick from the design options, so these are the defaults and can change:
+- **Entry point:** "Track Assigned Tasks..." in the dashboard's "What would you like to do?" list, next to Assign Tasks (same `MgtCID == 1518` gate). It's a separate overlay (`CMS/wwwroot/js/TrackTasks.js`) so the Phase 6 wizard rework doesn't touch it.
+- **Scope:** "Assigned by me" (default) or "My company" (every task assigned by anyone in the user's own company, `dbo.mycid`). Only the user's own rows get action buttons, and every action re-checks `MBX_IsTaskAssigner` server-side.
+- **Columns and filters:** task + subject, assignee + company, assigner (company view), sent, due (red when overdue), status (with completed/cancelled date or reminder count). Filters: Not finished (default), Pending my review, Overdue, Completed, Cancelled, All; plus a text search.
+- **Actions:**
+  - **Open:** the original message in the mailbox, through the existing one-time handoff. `MBX_CreateHandoffCode` now also accepts the message's author.
+  - **Mark Completed:** shown while the task is Pending Review; uses the same `MBX_ReviewTask` as the mailbox button.
+  - **Remind:** a link-only email, at most one an hour per task.
+  - **Cancel:** for anything not Completed or already Cancelled; can't be undone.
+- **Reminders:** manual only, with no scheduled job.
+- **Cancelled in the mailbox:** grey "Cancelled by the sender" banner. A form task that was never started shows a note instead of a blank form. A Dynamic Report task shows "nothing to upload". An exam opens read-only (`CanWrite` was already false).
+- **SQL 021:** new `MBX_Task` columns (`DTCancelled`, `CancelledByUID`, `DTLastReminder`, `ReminderCount`), plus `MBX_GetAssignedTasks`, `MBX_CancelTask`, `MBX_RemindTask` and the new `MBX_CreateHandoffCode`.
+- **CMS routes** (`MailboxShareController`): `main/GetAssignedTasks`, `main/CancelMailboxTask`, `main/ReviewMailboxTask`, `main/RemindMailboxTask`.
 
 ## Phases
 1. **Foundation + Form Application task:** SQL 006, the CMS popup and picker, the task card in the mailbox, and IA new-record mode. Delivers one complete task type from start to finish.
 2. **Dynamic Report task.**
 3. **Exam task** (the large port).
 4. **Tracking:** an MGT task list in CMS, Sent-folder status, reminder emails if wanted.
+5. **File attachments on secure messages** (requested 2026-10-22), separate from tasks: a sender attaches their own files to a secure email, alongside or instead of tasks.
+6. **Assign Tasks as a wizard** (requested 2026-10-23): rework the Assign Tasks overlay into a cleaner step-by-step wizard (e.g. pick tasks → pick the assignee → message, due date and review → confirm) instead of today's single crowded window.
 
 ## Needed / to check
 - Proc definitions (look in `SQL_Repos` first): `NEO_MGTGetExams`, `NEO_IASubmitDataByGen300_2` (does it return the new MainID?), `NEO_InsertDynamicReports_v3`, `NEO_NewSECURITY` (MGT detection, DynamicReports/Exams flags), and the exam read/write procs the viewer uses.

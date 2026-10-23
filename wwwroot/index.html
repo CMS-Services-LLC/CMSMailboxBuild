@@ -571,6 +571,13 @@
                     // A task item that hasn't been started (ItemID "0") opens
                     // ia-viewer.html in new-record mode — same page, same URL; the
                     // server decides the mode from the item itself.
+                    if (item.TaskStatus === "Cancelled" && String(item.ItemID) === "0") {
+                        // Cancelled before the record was started (sql/021): nothing to open.
+                        card.innerHTML = taskBanner(item) + "<strong>" + escapeHtml(item.ItemLabel || "Form Application Record") + "</strong>" +
+                            "<p class='hint'>The sender cancelled this task, so there's nothing to fill out.</p>";
+                        itemsArea.appendChild(card);
+                        return;
+                    }
                     card.innerHTML = taskBanner(item) + originBannerHtml(item) + reviewBarHtml(item) +
                         "<div class='mbx-item-header' style='display:flex;justify-content:space-between;align-items:center'>" +
                         "<strong>" + escapeHtml(item.ItemLabel || "Form Application Record") + "</strong>" +
@@ -634,12 +641,12 @@
         function originBannerHtml(item) {
             if (!item.OriginTaskStatus || item.ReviewTaskItemID) return "";
             var st = item.OriginTaskStatus;
-            var done = st === "Completed", pending = st === "Pending Review";
+            var done = st === "Completed", pending = st === "Pending Review", cancelled = st === "Cancelled";
             var label = { Saved: "Saved - waiting for Save for Use" }[st] || st;
             var what = { FormApplication: "Form Application task", DynamicReport: "Dynamic Report task", Exam: "Exam task" }[item.OriginTaskType] || "Task";
-            var due = (item.OriginDueDate && !done) ? " &middot; Due " + escapeHtml(String(item.OriginDueDate).substring(0, 10)) : "";
+            var due = (item.OriginDueDate && !done && !cancelled) ? " &middot; Due " + escapeHtml(String(item.OriginDueDate).substring(0, 10)) : "";
             return "<div class='taskBanner' style='padding:6px 10px;margin-bottom:8px;border-radius:3px;" +
-                (done ? "background:#e6f4ea;color:#1e6b34" : pending ? "background:#e8f0fe;color:#1a4a9c" : "background:#fff4e0;color:#8a5300") + "'>" +
+                (cancelled ? "background:#f1f3f4;color:#5f6368" : done ? "background:#e6f4ea;color:#1e6b34" : pending ? "background:#e8f0fe;color:#1a4a9c" : "background:#fff4e0;color:#8a5300") + "'>" +
                 "<b>" + what + ":</b> <b>" + escapeHtml(label) + "</b>" + due + "</div>";
         }
 
@@ -705,7 +712,10 @@
                 html += "<p class='hint'>This task is assigned to someone else.</p>";
             } else {
                 html += "<button class='secondary' onclick='downloadDRTemplate(" + item.MessageItemID + ")'>Download template</button>";
-                if (item.TaskStatus === "Open") {
+                if (item.TaskStatus === "Cancelled") {
+                    html = taskBanner(item) + "<strong>" + escapeHtml(item.ItemLabel || "Dynamic Report") + "</strong><div style='margin-top:8px'>" +
+                        "<p class='hint'>The sender cancelled this task, so there's nothing to upload.</p>";
+                } else if (item.TaskStatus === "Open") {
                     html += "<p class='hint'>Fill in the template (keep its column headers), then upload it here.</p>" +
                         "<input type='file' accept='.xlsx' id='drFile_" + item.MessageItemID + "' /> " +
                         "<button class='primary' id='drUpload_" + item.MessageItemID + "' onclick='uploadDRTask(" + item.MessageItemID + ")'>Upload completed report</button>" +
@@ -762,6 +772,7 @@
             if (!item.TaskID) return "";
             var done = item.TaskStatus === "Completed";
             var pending = item.TaskStatus === "Pending Review";
+            var cancelled = item.TaskStatus === "Cancelled";
             var what = {
                 FormApplication: "Fill out this form and click Save for Use",
                 DynamicReport: "Fill in the Excel template and upload it",
@@ -771,13 +782,13 @@
                 Completed: "Completed",
                 "Pending Review": "Pending Review",
                 Saved: "Saved - waiting for Save for Use",
-                Cancelled: "Cancelled"
+                Cancelled: "Cancelled by the sender"
             }[item.TaskStatus] || "Open";
             // DueDate is a SQL date (serialized as midnight) — show the date part as-is
             // rather than letting a timezone conversion shift it a day.
-            var due = item.DueDate ? " &middot; Due " + escapeHtml(String(item.DueDate).substring(0, 10)) : "";
+            var due = (item.DueDate && !cancelled) ? " &middot; Due " + escapeHtml(String(item.DueDate).substring(0, 10)) : "";
             return "<div class='taskBanner' style='padding:6px 10px;margin-bottom:8px;border-radius:3px;" +
-                (done ? "background:#e6f4ea;color:#1e6b34" : pending ? "background:#e8f0fe;color:#1a4a9c" : "background:#fff4e0;color:#8a5300") + "'>" +
+                (cancelled ? "background:#f1f3f4;color:#5f6368" : done ? "background:#e6f4ea;color:#1e6b34" : pending ? "background:#e8f0fe;color:#1a4a9c" : "background:#fff4e0;color:#8a5300") + "'>" +
                 "<b>Task:</b> " + what + due + " &middot; <b>" + statusText + "</b></div>";
         }
 
