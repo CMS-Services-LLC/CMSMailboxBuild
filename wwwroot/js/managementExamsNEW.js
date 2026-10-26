@@ -288,13 +288,16 @@ function viewMgtExam(ExamID, xcid, xcompany, snapshot) {
 
     c_log(myCID, xcid);
     section("ExamOpts", [
-        //code:so 20240705 12:11pm; Added the print to PDF button
-        "label|style=float:right; color:maroon|class=alink excludePrint|onclick=PopUp('PDF Preview', null, null, true)|Print to PDF",
+        //code:20261026 the right-hand exam options (Print to PDF, Heatmap Report, Exam Zip Options, Snapshots, Workflow)
+        //live in one "Actions" dropdown; Question-by-Question View stays a toggle. See buildExamActions / addExamAction.
+        "label|style=float:right|id=examActionsWrap|class=excludePrint",
         "label|style=float:right; width:10px|",
+        //code:so 20240705 12:11pm; Added the print to PDF button
+        //"label|style=float:right; color:maroon|class=alink excludePrint|onclick=PopUp('PDF Preview', null, null, true)|Print to PDF",
         "label|style=float:right|id=srchGrades",
         //"label|style=float:right; width:10px|",
         //"label|style=float:right; color:maroon|class=alink excludePrint|onclick=showOnlyAttachments()|Attachment View",
-        ((xcid != 0) ? "label|style=float:right; color:maroon|class=alink excludePrint|onclick=generateJSReport()|Heatmap Report" : ""),
+        //((xcid != 0) ? "label|style=float:right; color:maroon|class=alink excludePrint|onclick=generateJSReport()|Heatmap Report" : ""),
         "label|style=float:right|id=sectExamSharing|class=excludePrint",
         "label|style=float:right; width:10px|",
         "label|class=toggle-switch|style=float:right;|id=toggle_switch_id",
@@ -316,6 +319,10 @@ function viewMgtExam(ExamID, xcid, xcompany, snapshot) {
         "span|class=slider",
 
     ]);
+
+    buildExamActions();
+    addExamAction("Print to PDF", function () { PopUp('PDF Preview', null, null, true); });
+    if (xcid != 0) { addExamAction("Heatmap Report", function () { generateJSReport(); }); }
 
     //section("srchGrades", ["label|class=alink excludePrint|style=color:maroon|onclick=searchGrades()|Needs Attention"]);
 
@@ -383,16 +390,21 @@ function viewMgtExam(ExamID, xcid, xcompany, snapshot) {
          //   ((jsMgtDocs.filter(d => d.FID != null).length > 0) ? "a|icon=zip.png|icon.style=padding-right:5px;|class=excludePrint|style=float:right;color:steelblue|onclick=GetZipFile('" + ExamID + "'," + xcid + ")|Zip Document Requests" : ""),
         ])
         
+        //code:20261026 Exam Zip Options and Snapshots moved into the Actions dropdown (same conditions as before)
+        if (jsMgtDocs.filter(d => d.FID != null).length > 0) { addExamAction("Exam Zip Options", function () { GetZipFile(ExamID, xcid); }); }
+        //code:20261001 exam snapshots (same visibility as the audit buttons)
+        if ([ExamOwnerCID, xcid].indexOf(myCID) > -1) { addExamAction("Snapshots", function () { showExamSnapshots(ExamID, xcid); }); }
         section("ExamOpts", [
-            ((jsMgtDocs.filter(d => d.FID != null).length > 0) ? "label|class=alink excludePrint|style=float:right;color:maroon;|onclick=GetZipFile('" + ExamID + "'," + xcid + ")|Exam Zip Options" : ""),
-            //code:20261001 exam snapshots (same visibility as the audit buttons)
-            (([ExamOwnerCID, xcid].indexOf(myCID) > -1) ? "label|class=alink excludePrint|style=float:right;color:maroon;padding-right:20px|onclick=showExamSnapshots('" + ExamID + "'," + xcid + ")|Snapshots" : ""),
+            //((jsMgtDocs.filter(d => d.FID != null).length > 0) ? "label|class=alink excludePrint|style=float:right;color:maroon;|onclick=GetZipFile('" + ExamID + "'," + xcid + ")|Exam Zip Options" : ""),
+            //(([ExamOwnerCID, xcid].indexOf(myCID) > -1) ? "label|class=alink excludePrint|style=float:right;color:maroon;padding-right:20px|onclick=showExamSnapshots('" + ExamID + "'," + xcid + ")|Snapshots" : ""),
             //((jsMgtDocs.filter(d => d.FID != null).length > 0) ? "label|class=alink excludePrint|style=float:right;color:maroon;|onclick=createExamZipFile('" + ExamID + "'," + xcid + ")|Create Zip File" : ""),
             //((jsMgtDocs.filter(d => d.FID != null).length > 0) ? "label|class=alink excludePrint|style=float:right;color:maroon;|onclick=PopUp('Show Exam Zip Options', [xCID, ExamID, LineID, DocReqID, fromPCorCMS], null, null, ["400px", "900px"])|Exam zip options" : ""),
             // PopUp("Exam Zip Options", [xCID, ExamID, LineID, DocReqID, fromPCorCMS], null, null, ["400px", "900px"]);
             //createExamZipFile('" + ExamID + "'," + xCID + ")|Create Zip File
             //PopUp("Show Exam Zip Options", [xCID, ExamID, LineID, DocReqID, fromPCorCMS], null, null, ["400px", "900px"]);
         ])
+        //code:20261025 exam workflow link (added only if the server says this exam has one and the caller may see it)
+        if (!MgtSnapshot) { loadWorkflowLink(ExamID, xcid); }
 
         //BUILD BANNER AND TABLE
         nsection("availExamsInner", [
@@ -2053,6 +2065,9 @@ function MGTAnswerOnchange(LineID, QNum, CB, runConfirm) {
                 if (runConfirm)
                     fld.style.display = "";
 
+                //code:20261025 exam workflow: a remediation unchecked within an hour of being set -> offer to drop its action
+                if (CB != null && answer == "" && QNum > 0) { mgtWorkflowCheckRemoval(LineID, QNum); }
+
                 //SendEmailAlert('Exams', MgtExamID, MgtXCID);
             });
         }
@@ -3172,7 +3187,7 @@ var MgtSnapReads = {
 };
 
 // exam writes refused by getData while a snapshot is open - they would otherwise write to the LIVE exam
-var MgtSnapBlockedWrites = /^_(MgtUpdateAnswers?|MgtArchiveAnswer|MgtUpdateLMC|MgtUpdateForm|MgtDeleteFormDoc|MGTExamAttachCMSDoc|MGTExamUploadDoc|SetExamDefaultScores)$/;
+var MgtSnapBlockedWrites = /^_(MgtUpdateAnswers?|MgtArchiveAnswer|MgtUpdateLMC|MgtUpdateForm|MgtDeleteFormDoc|MGTExamAttachCMSDoc|MGTExamUploadDoc|SetExamDefaultScores|MgtWorkflowRemoveAction)$/;
 
 // [actions[], params[]] -> the snapshot equivalents when a snapshot is open.
 // snapshotid goes FIRST: the adHoc dispatcher binds params positionally in key order (exec NEO_x @uid, @snapshotid, ...)
@@ -3322,4 +3337,493 @@ function getExamAndHeatmapHTML(includePDF, includeHeatmap, callback) {
         console.log("Final (no heatmap): examHTML length=", examHTML.length, "heatmapHTML length=", heatmapHTML.length);
         callback(examHTML, heatmapHTML);
     }
+}
+
+//code:20261026 EXAM "ACTIONS" DROPDOWN - the right-hand exam options in one select (built in viewMgtExam).
+// Each entry is a label + function; entries can arrive late (Workflow waits on the server) and are kept unique by label.
+var MgtExamActions = [];
+
+function buildExamActions() {
+    MgtExamActions = [];
+    var wrap = document.getElementById("examActionsWrap");
+    if (!wrap) { return; }
+    wrap.innerHTML = "";
+
+    var sel = document.createElement("select");
+    sel.id = "examActions";
+    sel.style.cssText = "padding:5px;font-weight:bold;color:maroon;cursor:pointer";
+    var ph = document.createElement("option");
+    ph.value = "";
+    ph.textContent = "Actions";
+    sel.appendChild(ph);
+    sel.onchange = function () {
+        var a = MgtExamActions[sel.value];
+        sel.value = "";
+        if (a) { a.fn(); }
+    };
+    wrap.appendChild(sel);
+}
+
+function addExamAction(label, fn) {
+    var sel = document.getElementById("examActions");
+    if (!sel || MgtExamActions.some(a => a.label == label)) { return; }
+    MgtExamActions.push({ label: label, fn: fn });
+    var opt = document.createElement("option");
+    opt.value = MgtExamActions.length - 1;
+    opt.textContent = label;
+    sel.appendChild(opt);
+}
+
+//code:20261025 EXAM WORKFLOW - remediation tracking (SharedSQLWithClaude/FEATURE_ExamWorkflow, spec markdowns/CMSNeo_Workflow_Spec.md)
+// The exam write procs log to the workflow themselves (003_ExamWorkflow_hooks.sql); this page only reads it,
+// shows the link, asks the one-hour question, and makes the PDF report. Every call is re-checked server-side
+// (CID 1518 network + AccessTreeDown / own company).
+var MgtWorkflowSendUrl = "../main/SendWorkflowPdf"; // CMSMailbox's exam viewer overrides these two
+var MgtWorkflowPdfUrl = "../main/WorkflowPdf";
+var MgtWorkflowCanManage = false;
+
+var MgtWorkflowEventNames = {
+    remediation_set: "Remediation set",
+    remediation_edited: "Remediation edited",
+    remediation_removed: "Remediation removed (complete)",
+    action_removed: "Removed from workflow",
+    answer_added: "Answer added",
+    answer_edited: "Answer edited",
+    answer_archived: "Answer archived",
+    doc_uploaded: "Document uploaded",
+    doc_attached: "Document attached",
+    doc_deleted: "Document deleted"
+};
+
+function mgtWorkflowDT(dt) {
+    return (dt == null || dt == "") ? "time not recorded" : convertDT(dt);
+}
+
+// "Workflow" entry in the exam's Actions dropdown. The status call also back-fills an exam begun before this feature.
+function loadWorkflowLink(ExamID, xcid) {
+    getData(null, newFormData("_MgtGetWorkflowStatus", { examid: ExamID, xcid: xcid }), function (vr) {
+        var js = jparse(vr);
+        if (js.length == 0 || js[0].err || !js[0].HasWorkflow) { return; }
+        MgtWorkflowCanManage = js[0].CanManage;
+        addExamAction("Workflow", function () { showExamWorkflow(ExamID, xcid); });
+    });
+}
+
+// The workflow report opens in its own browser tab (John, 2026-10-26). The tab is a blank same-origin page that
+// this exam page writes into and keeps driving: every server call still goes through this page's getData/fetch
+// with its live token, so the tab needs no login or token of its own. wfDoc is the tab's document.
+var wfWin = null;
+var wfDoc = document;
+
+function showExamWorkflow(ExamID, xCID) {
+    var w = window.open("", "cmsExamWorkflow_" + ExamID + "_" + xCID);
+    if (!w) {
+        xconfirm("Your browser blocked the Workflow tab. Allow pop-ups for this site, then choose Workflow again.");
+        return;
+    }
+    // only one tab is driven at a time: an earlier tab for another exam is told it's disconnected
+    if (wfWin && wfWin !== w && !wfWin.closed) { mgtWorkflowDetach(wfWin.document); }
+    if (!MgtWorkflowUnloadHooked) {
+        MgtWorkflowUnloadHooked = true;
+        window.addEventListener("pagehide", function () {
+            try { if (wfWin && !wfWin.closed) { mgtWorkflowDetach(wfWin.document); } } catch (ex) { }
+        });
+    }
+    wfWin = w;
+    wfDoc = w.document;
+
+    var exam = (jsMgtExam && jsMgtExam[0]) ? jsMgtExam[0] : {};
+    wfDoc.open();
+    wfDoc.write("<!doctype html><html><head><meta charset='utf-8'><title>Workflow</title><style>" +
+        "html,body{height:100%;margin:0}" +
+        "body{font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#222;display:flex;flex-direction:column;background:#fff}" +
+        "#wfHead{padding:12px 16px 4px 16px;flex:none;border-bottom:solid 1px #ddd}" +
+        "#wfHead .t{font-size:18px;font-weight:bold;margin-bottom:4px}" +
+        "#wfHead span{margin-right:36px}" +
+        ".longblueButton{background-color:steelblue;color:#fff;border:none;border-radius:4px;padding:6px 12px;font-size:13px;cursor:pointer}" +
+        ".longblueButton:disabled{opacity:.6;cursor:default}" +
+        "</style></head><body>" +
+        "<div id='wfHead'><div class='t'>Exam Workflow</div><div id='wfHeadInfo'></div></div>" +
+        "<div id='wfToolbar' style='padding:8px 16px;flex:none'></div>" +
+        "<div id='wfSend' style='padding:6px 16px;display:none;flex:none'></div>" +
+        "<div id='wfError' style='color:red;font-size:12px;margin:6px 16px;display:none;flex:none'></div>" +
+        "<div id='wfMsg' style='color:#1d6b33;font-size:12px;margin:6px 16px;display:none;flex:none'></div>" +
+        "<div id='wfSummary' style='padding:2px 16px 6px 16px;color:#555;flex:none'></div>" +
+        "<div id='wfList' style='padding:6px 16px 16px 16px;flex:1;min-height:0;overflow-y:auto'></div>" +
+        "</body></html>");
+    wfDoc.close();
+    wfDoc.title = "Workflow - " + (MgtExamName || "Exam") + " - " + (MgtXCompany || "");
+
+    // header: Exam / Managed By / Assigned to, as on the PDF (textContent: names are user-entered)
+    var info = wfDoc.getElementById("wfHeadInfo");
+    [["Exam: ", MgtExamName], ["Managed By: ", exam.ManagingCompany], ["Assigned to: ", MgtXCompany]].forEach(function (p) {
+        var sp = wfDoc.createElement("span");
+        sp.appendChild(wfDoc.createTextNode(p[0]));
+        var b = wfDoc.createElement("b");
+        b.textContent = p[1] || "";
+        sp.appendChild(b);
+        info.appendChild(sp);
+    });
+
+    MgtWorkflowOpen = []; // a freshly opened tab starts with every action's details hidden
+    ExamWorkflow(ExamID, xCID);
+    w.focus();
+}
+
+var MgtWorkflowUnloadHooked = false;
+
+// the exam page that drives this tab is gone (or now drives another tab): say so and disable the controls
+function mgtWorkflowDetach(doc) {
+    try {
+        Array.from(doc.querySelectorAll("button,select,textarea,input")).forEach(e => e.disabled = true);
+        if (doc.getElementById("wfDetached")) { return; }
+        var d = doc.createElement("div");
+        d.id = "wfDetached";
+        d.style.cssText = "margin:8px 16px;padding:6px 12px;background-color:#fff4d6;border:solid 1px #e0b84c;border-radius:4px;flex:none";
+        d.textContent = "This Workflow tab is no longer connected to its exam. Reopen it from the exam's Actions menu to refresh or send it.";
+        var head = doc.getElementById("wfHead");
+        if (head) { head.parentNode.insertBefore(d, head.nextSibling); }
+    } catch (ex) { }
+}
+
+function ExamWorkflow(ExamID, xCID) {
+    var bar = wfDoc.getElementById("wfToolbar");
+    bar.style.cssText += ";display:flex;align-items:center;gap:12px";
+
+    var fl = wfDoc.createElement("label");
+    fl.style.fontSize = "13px";
+    fl.textContent = "Show: ";
+    var sel = wfDoc.createElement("select");
+    sel.id = "wfFilter";
+    sel.style.cssText = "padding:4px;font-size:13px";
+    [["all", "Everything"], ["pending", "Pending only"]].forEach(function (o) {
+        var opt = wfDoc.createElement("option");
+        opt.value = o[0];
+        opt.textContent = o[1];
+        sel.appendChild(opt);
+    });
+    try { sel.value = localStorage.getItem("mgtWorkflowFilter") || "all"; } catch (ex) { }
+    sel.onchange = function () {
+        try { localStorage.setItem("mgtWorkflowFilter", sel.value); } catch (ex) { }
+        renderExamWorkflow();
+    };
+    fl.appendChild(sel);
+    bar.appendChild(fl);
+
+    // the PDF is the displayed report: same rows, same Show filter (built server-side, landscape)
+    var dl = wfDoc.createElement("button");
+    dl.className = "longblueButton";
+    dl.textContent = "Download PDF";
+    dl.onclick = function () { mgtWorkflowDownloadPdf(ExamID, xCID, dl); };
+    bar.appendChild(dl);
+
+    var btn = wfDoc.createElement("button");
+    btn.className = "longblueButton";
+    btn.textContent = "Send PDF via Secure Email";
+    btn.onclick = function () { mgtWorkflowShowSend(ExamID, xCID); };
+    bar.appendChild(btn);
+
+    // the tab doesn't see later changes made on the exam page by itself
+    var rf = wfDoc.createElement("button");
+    rf.className = "longblueButton";
+    rf.textContent = "Refresh";
+    rf.onclick = function () { loadExamWorkflow(ExamID, xCID); };
+    bar.appendChild(rf);
+
+    loadExamWorkflow(ExamID, xCID);
+}
+
+var MgtWorkflowRows = []; // last _MgtGetWorkflow result; the Show filter re-renders from it
+var MgtWorkflowOpen = []; // ActionIDs whose details are expanded (kept across filter changes and Refresh)
+
+function loadExamWorkflow(ExamID, xCID) {
+    getData(null, newFormData("_MgtGetWorkflow", { examid: ExamID, xcid: xCID }), function (vr) {
+        var js = jparse(vr);
+        if (!wfWin || wfWin.closed) { return; } //tab closed
+        var block = wfDoc.getElementById("wfList");
+        if (!block) { return; }
+        block.innerHTML = "";
+        mgtWorkflowError("");
+
+        if (js.length > 0 && js[0].err) {
+            mgtWorkflowError("Unable to load the workflow.");
+            return;
+        }
+        MgtWorkflowRows = js.filter(d => d.ActionID);
+        renderExamWorkflow();
+    });
+}
+
+function renderExamWorkflow() {
+    var block = wfDoc.getElementById("wfList");
+    if (!block) { return; }
+    block.innerHTML = "";
+    var sum = wfDoc.getElementById("wfSummary");
+    sum.textContent = "";
+    var js = MgtWorkflowRows;
+
+    if (js.length == 0) {
+        mgtWorkflowNote(block, "No workflow actions for this exam and company.");
+        return;
+    }
+
+    // one card per action, events in order; DOM/textContent because answers and remediation text are user-entered
+    var actionIDs = [];
+    js.forEach(d => { if (actionIDs.indexOf(d.ActionID) == -1) actionIDs.push(d.ActionID); });
+
+    var pending = actionIDs.filter(id => js.find(d => d.ActionID == id).Status == "Pending").length;
+    sum.textContent = actionIDs.length + " action(s): " + pending + " pending, " + (actionIDs.length - pending) + " complete";
+
+    var filter = wfDoc.getElementById("wfFilter");
+    if (filter && filter.value == "pending") {
+        actionIDs = actionIDs.filter(id => js.find(d => d.ActionID == id).Status == "Pending");
+        if (actionIDs.length == 0) {
+            mgtWorkflowNote(block, "No pending actions.");
+            return;
+        }
+    }
+
+    actionIDs.forEach(function (id) {
+        var rows = js.filter(d => d.ActionID == id);
+        var a = rows[0];
+
+        var card = wfDoc.createElement("div");
+        card.style.cssText = "border:solid 1px #ddd;border-radius:4px;margin-bottom:10px;padding:8px 10px;font-size:13px";
+
+        var hd = wfDoc.createElement("div");
+        hd.style.cssText = "display:flex;justify-content:space-between;gap:10px";
+        var ttl = wfDoc.createElement("div");
+        ttl.style.fontWeight = "bold";
+        ttl.textContent = (a.ModNum || "") + "." + (a.QuestNum || "") + " " + (a.Module || "");
+        var badge = wfDoc.createElement("span");
+        badge.textContent = a.Status;
+        badge.style.cssText = "padding:1px 8px;border-radius:10px;font-size:12px;white-space:nowrap;" +
+            ((a.Status == "Pending") ? "background-color:#fff4d6;color:#8a6100" : "background-color:#dff3e3;color:#1d6b33");
+        hd.appendChild(ttl);
+        hd.appendChild(badge);
+        card.appendChild(hd);
+
+        if (a.Question) {
+            var q = wfDoc.createElement("div");
+            q.style.cssText = "color:#555;margin:3px 0";
+            q.textContent = a.Question;
+            card.appendChild(q);
+        }
+        var rem = wfDoc.createElement("div");
+        rem.style.cssText = "margin:3px 0";
+        rem.textContent = "Remediation: " + (a.RemediationText || "");
+        card.appendChild(rem);
+
+        // event lines are hidden until the "Show details" line is clicked (arrow on the far right)
+        var open = MgtWorkflowOpen.indexOf(id) > -1;
+        var tog = wfDoc.createElement("div");
+        tog.style.cssText = "display:flex;justify-content:space-between;align-items:center;margin-top:6px;padding:4px 6px;" +
+            "border-top:solid 1px #eee;color:steelblue;cursor:pointer;user-select:none";
+        var togTxt = wfDoc.createElement("span");
+        var togArrow = wfDoc.createElement("span");
+        togArrow.style.cssText = "font-size:12px;padding-left:10px";
+        tog.appendChild(togTxt);
+        tog.appendChild(togArrow);
+        card.appendChild(tog);
+
+        var tbl = wfDoc.createElement("table");
+        tbl.style.cssText = "width:100%;border-collapse:collapse;margin-top:2px";
+
+        function setOpen(o) {
+            open = o;
+            tbl.style.display = (open) ? "" : "none";
+            togTxt.textContent = ((open) ? "Hide details" : "Show details") + " (" + rows.length + ")";
+            togArrow.textContent = (open) ? "▲" : "▼";
+            MgtWorkflowOpen = MgtWorkflowOpen.filter(x => x != id);
+            if (open) { MgtWorkflowOpen.push(id); }
+        }
+        tog.onclick = function () { setOpen(!open); };
+        setOpen(open);
+
+        rows.forEach(function (e) {
+            var tr = tbl.insertRow();
+            var by = (e.ActorName || "") + ((e.ActorCompany) ? " (" + e.ActorCompany + ")" : "");
+            var detail = (e.NewText || e.OldText || "");
+            if (e.EventType == "answer_edited" && e.OldText) { detail = e.OldText + "  →  " + (e.NewText || ""); }
+            if (e.EventType.indexOf("remediation_") == 0 && e.EventType != "remediation_edited") { detail = ""; }
+            if (e.Note) { detail = (detail ? detail + " " : "") + "[" + e.Note + "]"; }
+
+            [mgtWorkflowDT(e.DTEvent), MgtWorkflowEventNames[e.EventType] || e.EventType, by, detail].forEach(function (v, i) {
+                var td = tr.insertCell();
+                td.textContent = v;
+                td.style.cssText = "padding:3px 6px;border-top:solid 1px #eee;vertical-align:top" +
+                    ((i < 2) ? ";white-space:nowrap" : "") + ((i == 3) ? ";color:#555" : "");
+            });
+        });
+        card.appendChild(tbl);
+        block.appendChild(card);
+    });
+}
+
+function mgtWorkflowError(msg) {
+    var e = wfDoc.getElementById("wfError");
+    if (!e) { return; }
+    e.textContent = msg;
+    e.style.display = (msg) ? "block" : "none";
+    if (msg) { mgtWorkflowMsg(""); }
+}
+
+// confirmation line in the tab (the exam page's smconfirm would show on the other tab)
+function mgtWorkflowMsg(msg) {
+    var e = wfDoc.getElementById("wfMsg");
+    if (!e) { return; }
+    e.textContent = msg;
+    e.style.display = (msg) ? "block" : "none";
+    if (msg) { setTimeout(function () { if (e.textContent == msg) { e.style.display = "none"; } }, 4000); }
+}
+
+function mgtWorkflowNote(block, msg) {
+    var d = wfDoc.createElement("div");
+    d.style.cssText = "color:#888;font-size:13px";
+    d.textContent = msg;
+    block.appendChild(d);
+}
+
+// ---- one-hour rule: after unchecking a remediation, offer to drop the matching workflow action ----
+function mgtWorkflowCheckRemoval(LineID, QNum) {
+    getData(null, newFormData("_MgtGetWorkflowRecentRemoval", { examid: MgtExamID, xcid: MgtXCID, lineid: LineID, qnum: QNum }), function (vr) {
+        var js = jparse(vr);
+        if (js.length == 0 || js[0].err || !js[0].ActionID) { return; }
+
+        xconfirm("This remediation was added less than an hour ago. Remove the corresponding action from the Workflow?",
+            null, "mgtWorkflowRemoveAction(" + (js[0].ActionID * 1) + ")");
+        // "No" (or closing) keeps the action, already marked complete
+        try {
+            xconfirmCancel.innerHTML = "No, keep it";
+            xconfirmContinue.innerHTML = "Yes, remove";
+        } catch (ex) { }
+    });
+}
+
+function mgtWorkflowRemoveAction(actionID) {
+    xconfirm();
+    getData(null, newFormData("_MgtWorkflowRemoveAction", { actionid: actionID }), function (vr) {
+        var js = jparse(vr);
+        if (js.length == 0 || js[0].status != "ok") {
+            xconfirm("The workflow action could not be removed" + ((js.length > 0 && js[0].status == "not_allowed") ? " (more than an hour old, or not permitted)." : "."));
+        }
+    });
+}
+
+function mgtWorkflowPendingOnly() {
+    var f = wfDoc.getElementById("wfFilter");
+    return !!(f && f.value == "pending");
+}
+
+// ---- PDF report: download (MailboxShareController.WorkflowPdf) ----
+function mgtWorkflowDownloadPdf(ExamID, xCID, btn) {
+    mgtWorkflowError("");
+    btn.disabled = true;
+    var fd = new FormData();
+    fd.append("strjson", JSON.stringify({ examId: ExamID, xcid: xCID, pendingOnly: mgtWorkflowPendingOnly() }));
+    fetch(MgtWorkflowPdfUrl, { method: "POST", headers: { "Authorization": "Bearer " + UserToken }, body: fd })
+        .then(function (r) {
+            if (!r.ok) throw new Error("WorkflowPdf " + r.status);
+            var cd = r.headers.get("Content-Disposition") || "";
+            var m = /filename\*=UTF-8''([^;]+)/i.exec(cd) || /filename="?([^";]+)"?/i.exec(cd);
+            return r.blob().then(function (b) { return { blob: b, name: (m) ? decodeURIComponent(m[1]) : "Workflow.pdf" }; });
+        })
+        .then(function (f) {
+            btn.disabled = false;
+            var url = URL.createObjectURL(f.blob);
+            var a = wfDoc.createElement("a");
+            a.href = url;
+            a.download = f.name;
+            wfDoc.body.appendChild(a);
+            a.click();
+            wfDoc.body.removeChild(a);
+            setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
+        })
+        .catch(function (ex) {
+            btn.disabled = false;
+            mgtWorkflowError("The PDF could not be created - see console.");
+            console.log("WorkflowPdf failed", ex);
+        });
+}
+
+// ---- PDF report via secure email (MailboxShareController.SendWorkflowPdf -> CMSMailbox message + attachment) ----
+function mgtWorkflowShowSend(ExamID, xCID) {
+    var box = wfDoc.getElementById("wfSend");
+    mgtWorkflowError("");
+    box.style.display = "";
+    box.innerHTML = "<div style='color:#777;font-size:13px'>Loading recipients...</div>";
+
+    getData(null, newFormData("_MgtGetWorkflowRecipients", { examid: ExamID, xcid: xCID }), function (vr) {
+        var js = jparse(vr);
+        box.innerHTML = "";
+        if (js.length > 0 && js[0].err) { mgtWorkflowError("Unable to load recipients."); return; }
+        js = js.filter(d => d.UID);
+
+        var lbl = wfDoc.createElement("div");
+        lbl.style.cssText = "font-weight:bold;font-size:13px;margin-bottom:4px";
+        lbl.textContent = "Send the Workflow PDF (" + (mgtWorkflowPendingOnly() ? "pending only" : "everything") + ") to:";
+        box.appendChild(lbl);
+
+        if (js.length == 0) {
+            var none = wfDoc.createElement("div");
+            none.style.cssText = "color:#888;font-size:13px";
+            none.textContent = "No one who works this exam can receive secure email.";
+            box.appendChild(none);
+            return;
+        }
+
+        var list = wfDoc.createElement("div");
+        list.style.cssText = "max-height:160px;overflow-y:auto;font-size:13px;border:solid 1px #eee;padding:4px";
+        js.forEach(function (r) {
+            var row = wfDoc.createElement("label");
+            row.style.cssText = "display:block;padding:2px 0;cursor:pointer";
+            var cb = wfDoc.createElement("input");
+            cb.type = "checkbox";
+            cb.value = r.UID;
+            cb.className = "wfRecipient";
+            row.appendChild(cb);
+            row.appendChild(wfDoc.createTextNode(" " + r.Name + " (" + (r.Company || "") + ")" + ((r.Side == "target") ? "" : " - management")));
+            list.appendChild(row);
+        });
+        box.appendChild(list);
+
+        var note = wfDoc.createElement("textarea");
+        note.id = "wfSendNote";
+        note.placeholder = "Message (optional)";
+        note.style.cssText = "width:100%;height:50px;margin-top:6px;font-size:13px";
+        box.appendChild(note);
+
+        var send = wfDoc.createElement("button");
+        send.className = "longblueButton";
+        send.textContent = "Send";
+        send.onclick = function () { mgtWorkflowSend(ExamID, xCID, send); };
+        box.appendChild(send);
+    });
+}
+
+function mgtWorkflowSend(ExamID, xCID, btn) {
+    var uids = Array.from(wfDoc.getElementsByClassName("wfRecipient")).filter(c => c.checked).map(c => c.value * 1);
+    if (uids.length == 0) { mgtWorkflowError("Pick at least one recipient."); return; }
+    mgtWorkflowError("");
+    btn.disabled = true;
+
+    var fd = new FormData();
+    fd.append("strjson", JSON.stringify({ examId: ExamID, xcid: xCID, recipients: uids, body: wfDoc.getElementById("wfSendNote").value, pendingOnly: mgtWorkflowPendingOnly() }));
+    fetch(MgtWorkflowSendUrl, { method: "POST", headers: { "Authorization": "Bearer " + UserToken }, body: fd })
+        .then(function (r) { return r.text(); })
+        .then(function (vr) {
+            btn.disabled = false;
+            var res = jparse(vr);
+            if (res.status == "ok") {
+                wfDoc.getElementById("wfSend").style.display = "none";
+                mgtWorkflowMsg("Workflow PDF sent by secure email.");
+            } else {
+                mgtWorkflowError("The PDF was not sent (" + (res.status || "error") + ").");
+            }
+        })
+        .catch(function (ex) {
+            btn.disabled = false;
+            mgtWorkflowError("The PDF was not sent - see console.");
+            console.log("SendWorkflowPdf failed", ex);
+        });
 }

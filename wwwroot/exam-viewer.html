@@ -29,13 +29,12 @@
   /* Out of scope for the mailbox (WizardAssignments_Plan.md Phase 3): the examined
      company answers questions and supplies document requests here; everything else
      stays in CMSNEO. managementExamsNEW.js is copied UNCHANGED, so these are hidden
-     here rather than edited out of it. */
+     here rather than edited out of it. Print to PDF, Exam Zip Options, Snapshots and
+     Heatmap Report now live in the exam's "Actions" dropdown, which the addExamAction
+     override below limits to Workflow; the dropdown stays hidden until Workflow arrives. */
   #ExamHeader a,                                   /* "< Back to Exams Selection" */
-  label[onclick*="PDF Preview"],                   /* Print to PDF */
-  label[onclick^="GetZipFile"],                    /* Exam Zip Options */
-  label[onclick^="showExamSnapshots"],             /* Snapshots */
-  label[onclick^="generateJSReport"],              /* Heatmap Report */
   #sectExamSharing { display: none !important; }
+  #examActionsWrap { display: none; }
 
   /* View-only once the task is Completed (the server refuses writes then too). */
   body.mbx-readonly .ocInput { pointer-events: none; background: #f4f4f4; }
@@ -139,6 +138,30 @@
       });
     };
 
+    // The exam's Actions dropdown: only Workflow is offered here (Print to PDF, Zip,
+    // Snapshots and Heatmap Report stay in CMSNEO). The dropdown shows once it has an entry.
+    var mbxOrigAddExamAction = addExamAction;
+    addExamAction = function (label, fn) {
+      if (label !== "Workflow") return;
+      mbxOrigAddExamAction(label, fn);
+      var w = document.getElementById("examActionsWrap");
+      if (w) w.style.display = "inline";
+    };
+
+    // Workflow report PDF: download/send through this app's exam/{item}/workflow routes
+    // (they check the task, then have CMSNEO build the PDF as this user). The calls read the
+    // global UserToken, so take the current one first — index.html's heartbeat refreshes it.
+    var mbxOrigWorkflowDownloadPdf = mgtWorkflowDownloadPdf;
+    mgtWorkflowDownloadPdf = function (ExamID, xCID, btn) {
+      UserToken = sessionStorage.getItem("UserToken") || UserToken;
+      mbxOrigWorkflowDownloadPdf(ExamID, xCID, btn);
+    };
+    var mbxOrigWorkflowSend = mgtWorkflowSend;
+    mgtWorkflowSend = function (ExamID, xCID, btn) {
+      UserToken = sessionStorage.getItem("UserToken") || UserToken;
+      mbxOrigWorkflowSend(ExamID, xCID, btn);
+    };
+
     // Opening a document: served by the mailbox itself (exam/{item}/doc/{fid}) with
     // this app's own login, instead of CMSNEO's DownloadExamFile route. A row's
     // onclick passes LinkedFID when the file was attached from CMS, so map back to
@@ -182,6 +205,9 @@
       if (!messageItemId) { deny(); return; }
       // Read by the patched newFormData() in js/global.js — every call is scoped to this item.
       window.MBX_CurrentMessageItemId = messageItemId;
+      UserToken = realToken;
+      MgtWorkflowPdfUrl = "exam/" + messageItemId + "/workflow/pdf";
+      MgtWorkflowSendUrl = "exam/" + messageItemId + "/workflow/send";
 
       fetch("exam/" + messageItemId + "/bootstrap", { headers: { "Authorization": "Bearer " + realToken } })
         .then(function (r) { if (!r.ok) throw new Error("bootstrap failed"); return r.json(); })

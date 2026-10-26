@@ -42,6 +42,15 @@
      are unaffected — they just become viewport-relative instead of
      content-relative, still landing in the same reasonable near-top-left offset. */
   .PopUp { position: fixed !important; }
+  /* Keep the record banner (MainID/status + Save / Save for Use / Additional
+     Actions) pinned to the top of the iframe while the user scrolls a long record —
+     the body is the scroll container here (see above), so it would otherwise scroll
+     out of view and the user has to scroll back up to save. */
+  #dispTopPanner { position: sticky; top: 0; z-index: 50; background-color: #fff; }
+  /* Unsaved-changes flag, shown next to the save buttons (see mbxTrackUnsaved). */
+  #mbxUnsavedFlag { display: none; color: #c0392b; font-weight: bold; font-size: 12px; padding-right: 10px; white-space: nowrap; }
+  body.mbxDirty #mbxUnsavedFlag { display: inline; }
+  body.mbxDirty .btnIASave:not(:disabled) { box-shadow: 0 0 0 3px #f5b041; }
 </style>
 </head>
 <body>
@@ -113,7 +122,55 @@
       }
     }, true);
 
+    // Unsaved-changes tracking. Each editable field (.submitInputField — the same
+    // set SubmitRecord() saves) has its original value captured the first time the
+    // user focuses it, before any edit; after every input/change the page is
+    // "dirty" while any field differs from its original, so undoing an edit clears
+    // the flag again. Done here rather than in the ported InteractiveForm.js so that
+    // file stays a copy of CMS's.
+    var mbxOriginals = new Map();
+    function mbxFieldValue(el) {
+      return (el.type === "checkbox") ? String(el.checked) : el.value;
+    }
+    function mbxIsField(el) {
+      // Multi-line note fields save themselves on exit (LoadIAMultiText) and are
+      // cleared afterwards, so they never hold unsaved Save-button changes.
+      return el && el.classList && el.classList.contains("submitInputField") &&
+        (el.getAttribute("onchange") || "").indexOf("LoadIAMultiText") === -1 &&
+        (el.placeholder || "").indexOf("save automatically") === -1;
+    }
+    function mbxTrackUnsaved() {
+      var dirty = false;
+      mbxOriginals.forEach(function (orig, el) {
+        if (el.isConnected && mbxFieldValue(el) !== orig) dirty = true;
+      });
+      document.body.classList.toggle("mbxDirty", dirty);
+      var flag = document.getElementById("mbxUnsavedFlag");
+      var btns = document.getElementById("dispButtons");
+      if (!flag && btns) {
+        flag = document.createElement("span");
+        flag.id = "mbxUnsavedFlag";
+        flag.textContent = "● Unsaved changes";
+        flag.title = "You have changes on this record that have not been saved yet.";
+        btns.insertBefore(flag, btns.firstChild);
+      }
+    }
+    document.addEventListener("focusin", function (e) {
+      if (mbxIsField(e.target) && !mbxOriginals.has(e.target)) {
+        mbxOriginals.set(e.target, mbxFieldValue(e.target));
+      }
+    }, true);
+    ["input", "change"].forEach(function (evt) {
+      document.addEventListener(evt, function (e) {
+        if (!mbxIsField(e.target)) return;
+        if (!mbxOriginals.has(e.target)) return; // changed without focus (script) — not a user edit
+        mbxTrackUnsaved();
+      }, true);
+    });
+
     function mbxRecordSaved() {
+      mbxOriginals.clear();
+      document.body.classList.remove("mbxDirty");
       if (window.parent && window.parent !== window) {
         window.parent.postMessage({ mbxRecordSaved: true }, window.location.origin);
       } else {

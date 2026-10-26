@@ -3,7 +3,11 @@ using System.Collections.Generic;
 using System.Data;
 using System.IO;
 using System.Linq;
+using System.Net.Http;
+using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
@@ -43,7 +47,12 @@ namespace CMSMailbox.Controllers
             "_MgtGetAuditButtons", "_MgtGetJSScoring", "_MgtGetForm", "_MgtGetHeatmapStaticPages",
             "_MGTGetLastView", "_MgtGetExamAnswers", "_MgtGetExamScores",
             // Which panels were open last time — per-user UI state, not exam content.
-            "_MGTUpdateLastView"
+            "_MGTUpdateLastView",
+            // Exam Workflow (CMS SharedSQLWithClaude/FEATURE_ExamWorkflow). Each proc checks the
+            // caller itself (1518 network + AccessTreeDown / own company) and is pinned to the
+            // task's examid/xcid below. _MgtGetWorkflowStatus can create + back-fill the
+            // workflow on first open, the same as opening the exam in CMSNEO.
+            "_MgtGetWorkflowStatus", "_MgtGetWorkflow", "_MgtGetWorkflowRecentRemoval", "_MgtGetWorkflowRecipients"
         };
 
         // Content writes: require CanWrite; the assignee's mark the task started.
@@ -55,7 +64,10 @@ namespace CMSMailbox.Controllers
         // Management view only (scoring): the Assigner role.
         private static readonly HashSet<string> ExamAssignerWriteActions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "_SetExamDefaultScores", "_MgtUpdateLMC"
+            "_SetExamDefaultScores", "_MgtUpdateLMC",
+            // The one-hour "remove from the Workflow" answer — management side only (the proc
+            // re-checks that too); the action must be on this task's exam (CheckExamWrite).
+            "_MgtWorkflowRemoveAction"
         };
 
         private class ExamTaskContext
@@ -323,7 +335,126 @@ namespace CMSMailbox.Controllers
                 return ok.Rows.Count > 0 && !ok.Columns.Contains("err") ? null : "document is not your upload on this exam";
             }
 
+            if (string.Equals(action, "_MgtWorkflowRemoveAction", StringComparison.OrdinalIgnoreCase))
+            {
+                var ok = DB.GetDB(
+                    "select top 1 1 as x from a_aMgtExamWorkflowAction x " +
+                    "join a_aMgtExamWorkflow w on w.WorkflowID = x.WorkflowID and w.Active = 1 " +
+                    "where x.ActionID = @actionid and w.ExamID = @examid and w.xCID = @xcid",
+                    uid, new JObject { ["actionid"] = int.TryParse(Val("actionid"), out var a) ? a : 0, ["examid"] = ctx.ExamID, ["xcid"] = ctx.ExamCID }.ToString());
+                return ok.Rows.Count > 0 && !ok.Columns.Contains("err") ? null : "workflow action is not on this exam";
+            }
+
             return null;
+        }
+
+        // ---- Exam Workflow report (PDF) -------------------------------------------------
+        // The copied viewer's Workflow tab downloads or sends the landscape PDF report. It is
+        // built by CMSNEO (main/MailboxWorkflowPdf: one GemBox, and its license, stays there),
+        // as THIS user with a freshly minted one-off token, same as the DR and IA PDF proxies.
+        // Both routes take strjson { examId, xcid, pendingOnly[, recipients, body] } and pin
+        // the exam to the task (any other examid is refused; xcid becomes the examined company).
+
+        [HttpPost("exam/{messageItemId:int}/workflow/pdf")]
+        public async Task<IActionResult> ExamWorkflowPdf(int messageItemId, [FromForm] string strjson)
+        {
+            int uid = CurrentUID();
+            if (uid == 0) return Unauthorized();
+            var ctx = ResolveExamTask(messageItemId, uid);
+            if (ctx == null) return NotFound();
+
+            var jo = string.IsNullOrEmpty(strjson) ? new JObject() : JObject.Parse(strjson);
+            if (!WorkflowExamMatches(jo, ctx)) { LogAccess(messageItemId, uid, "Denied", "exam workflow pdf: examid is not the task's exam"); return NotFound(); }
+
+            var pdf = await FetchWorkflowPdf(uid, ctx, jo["pendingOnly"]?.ToObject<bool?>() ?? false);
+            if (pdf == null) { LogAccess(messageItemId, uid, "Error", "exam workflow pdf: CMSNEO did not return it"); return NotFound(); }
+
+            LogAccess(messageItemId, uid, "Served", "exam workflow pdf");
+            return File(pdf.Value.Bytes, "application/pdf", pdf.Value.FileName);
+        }
+
+        [HttpPost("exam/{messageItemId:int}/workflow/send")]
+        public async Task<IActionResult> ExamWorkflowSend(int messageItemId, [FromForm] string strjson)
+        {
+            int uid = CurrentUID();
+            if (uid == 0) return Unauthorized();
+            var ctx = ResolveExamTask(messageItemId, uid);
+            if (ctx == null) return Content(new JObject { ["status"] = "not_found" }.ToString(), "application/json");
+
+            var jo = string.IsNullOrEmpty(strjson) ? new JObject() : JObject.Parse(strjson);
+            ContentResult St(string s) => Content(new JObject { ["status"] = s }.ToString(), "application/json");
+            if (!WorkflowExamMatches(jo, ctx)) { LogAccess(messageItemId, uid, "Denied", "exam workflow send: examid is not the task's exam"); return St("forbidden"); }
+
+            var requested = (jo["recipients"]?.ToObject<int[]>() ?? new int[0]).Distinct().ToArray();
+            if (requested.Length == 0) return St("bad_request");
+
+            // exam participants only — the same list the picker showed (NEO_MgtGetWorkflowRecipients)
+            var allowed = new HashSet<int>(DB.GetDB("exec NEO_MgtGetWorkflowRecipients @uid, @examid, @xcid", uid,
+                    new JObject { ["examid"] = ctx.ExamID, ["xcid"] = ctx.ExamCID }.ToString())
+                .Rows.Cast<DataRow>().Where(r => r.Table.Columns.Contains("UID")).Select(r => Convert.ToInt32(r["UID"])));
+            if (requested.Any(r => !allowed.Contains(r))) { LogAccess(messageItemId, uid, "Denied", "exam workflow send: recipient not an exam participant"); return St("forbidden"); }
+
+            var pdf = await FetchWorkflowPdf(uid, ctx, jo["pendingOnly"]?.ToObject<bool?>() ?? false);
+            if (pdf == null) { LogAccess(messageItemId, uid, "Error", "exam workflow send: CMSNEO did not return the PDF"); return St("proxy_failed"); }
+
+            string note = (jo["body"]?.ToString() ?? "").Trim();
+            string subject = "Exam Workflow: " + ctx.ExamName + (ctx.ExamCompany != "" ? " (" + ctx.ExamCompany + ")" : "");
+            if (subject.Length > 255) subject = subject.Substring(0, 255);
+            var msg = DB.GetDB("exec MBX_SendMessage @uid, @subject, @body", uid,
+                new JObject { ["subject"] = subject, ["body"] = (note != "" ? note + "\n\n" : "") + "The exam workflow report is attached as a PDF." }.ToString());
+            if (msg.Rows.Count == 0 || msg.Columns.Contains("err")) return St("error");
+            int messageId = (int)decimal.Parse(msg.Rows[0]["MessageID"].ToString());
+
+            DB.GetDB("exec MBX_AddRecipients @messageId, @recipientUIDsCSV", uid,
+                new JObject { ["messageId"] = messageId, ["recipientUIDsCSV"] = string.Join(",", requested) }.ToString());
+
+            // Binary parameter: DB.GetDB can't pass bytes (same as ComposeController.AddAttachment).
+            var att = new DataTable();
+            using (var da = new SqlDataAdapter("exec MBX_AddAttachment @uid, @messageId, @fileName, @contentType, @bytes", DB.ConnectionString))
+            {
+                da.SelectCommand.CommandTimeout = 180;
+                da.SelectCommand.Parameters.AddWithValue("@uid", uid);
+                da.SelectCommand.Parameters.AddWithValue("@messageId", messageId);
+                da.SelectCommand.Parameters.AddWithValue("@fileName", pdf.Value.FileName);
+                da.SelectCommand.Parameters.AddWithValue("@contentType", "application/pdf");
+                da.SelectCommand.Parameters.Add("@bytes", SqlDbType.VarBinary, -1).Value = pdf.Value.Bytes;
+                try { da.Fill(att); } catch { return St("error"); }
+            }
+            if (att.Rows.Count == 0 || att.Columns.Contains("err")) return St("error");
+
+            ComposeController.NotifyRecipients(uid, messageId);
+            LogAccess(messageItemId, uid, "Served", "exam workflow pdf sent as message " + messageId);
+            return Content(new JObject { ["status"] = "ok", ["messageId"] = messageId }.ToString(), "application/json");
+        }
+
+        private static bool WorkflowExamMatches(JObject jo, ExamTaskContext ctx)
+        {
+            string examId = jo["examId"]?.ToString() ?? "";
+            return string.Equals(examId, ctx.ExamID, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private async Task<(byte[] Bytes, string FileName)?> FetchWorkflowPdf(int uid, ExamTaskContext ctx, bool pendingOnly)
+        {
+            if (string.IsNullOrEmpty(DB.CmsUrl)) { _logger.LogWarning("exam workflow pdf: AppSettings:CmsUrl is not set"); return null; }
+
+            var mint = DB.GetDB("exec NEO_GetUserToken @uid", uid);
+            string freshToken = (mint.Rows.Count > 0 && mint.Columns.Contains("Token")) ? mint.Rows[0]["Token"].ToString() : null;
+            if (string.IsNullOrEmpty(freshToken)) { _logger.LogWarning("exam workflow pdf: NEO_GetUserToken returned no token"); return null; }
+
+            var client = _httpClientFactory.CreateClient("CmsProxy");
+            string url = DB.CmsUrl.TrimEnd('/') + "/main/MailboxWorkflowPdf?examId=" + Uri.EscapeDataString(ctx.ExamID) +
+                "&xcid=" + ctx.ExamCID + "&pendingOnly=" + (pendingOnly ? "true" : "false") +
+                "&token=" + Uri.EscapeDataString(freshToken);
+
+            HttpResponseMessage resp;
+            try { resp = await client.GetAsync(url); }
+            catch (Exception ex) { _logger.LogWarning("exam workflow pdf: request to CMSNEO threw {Reason}", DescribeException(ex)); return null; }
+            if (!resp.IsSuccessStatusCode) { _logger.LogWarning("exam workflow pdf: CMSNEO responded {Status}", (int)resp.StatusCode); return null; }
+
+            var bytes = await resp.Content.ReadAsByteArrayAsync();
+            string fileName = resp.Content.Headers.ContentDisposition?.FileNameStar ?? resp.Content.Headers.ContentDisposition?.FileName?.Trim('"');
+            if (string.IsNullOrEmpty(fileName)) fileName = "Workflow.pdf";
+            return (bytes, fileName);
         }
 
         private static void MarkExamStarted(int messageItemId, int uid)
