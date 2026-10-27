@@ -21,6 +21,22 @@ namespace CMSMailbox
             return creds;
         }
 
+        // Thin branded footer appended to every email this app sends.
+        private const string Footer =
+            "<table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" width=\"100%\" style=\"max-width:600px; margin:20px auto 0; background-color:#ffffff; border-top:3px solid #015390;\">" +
+              "<tr><td style=\"padding:10px 16px; text-align:center; background-color:#f8fafc;\">" +
+                "<table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" width=\"100%\"><tr>" +
+                  "<td style=\"text-align:center; padding-bottom:6px;\">" +
+                    "<span style=\"font-size:13px; color:#333333; font-weight:600;\">Access full CMS operations &rarr; </span>" +
+                    "<a href=\"https://portal.cms-services.net\" target=\"_blank\" style=\"display:inline-block; background-color:#015390; color:#ffffff; padding:6px 16px; font-size:13px; font-weight:bold; text-decoration:none; border-radius:4px;\">Log In to Portal</a>" +
+                  "</td>" +
+                "</tr></table>" +
+              "</td></tr>" +
+              "<tr><td style=\"padding:6px 16px; background-color:#015390; color:#ffffff; font-size:10px; line-height:1.4; text-align:center;\">" +
+                "CMS Secure Email &nbsp;&middot;&nbsp; Confidential &ndash; intended only for the named recipient(s)." +
+              "</td></tr>" +
+            "</table>";
+
         public static void SendIPAuth(string email, string auth)
         {
             var creds = Creds();
@@ -35,7 +51,8 @@ namespace CMSMailbox
                 "<p>Please click the link below to validate this location and enter the site.</p>" +
                 @"<p><a href=""" + DB.Url + @"/Validate?auth=" + auth + @""">Validate my IP Address</a></p>" +
                 "<p style=\"color:red\">*** If you believe a login was attempted by someone other than yourself, please click the link below.</p>" +
-                @"<p><a href=""" + DB.Url + @"/Validate?deny=" + auth + @""">Deny Validation from this IP Address</a></p>"
+                @"<p><a href=""" + DB.Url + @"/Validate?deny=" + auth + @""">Deny Validation from this IP Address</a></p>" +
+                Footer
             };
 
             using (var client = new SmtpClient())
@@ -72,7 +89,8 @@ namespace CMSMailbox
                     "<p style=\"font-size:11px;color:#777\">This is an automated notification from CMS Secure Mailbox. " +
                     "It does not contain any confidential information — sign in to CMS Secure Mailbox with your own " +
                     "credentials to view the message. If you were not expecting this message, please " +
-                    "contact your system administrator.</p>"
+                    "contact your system administrator.</p>" +
+                    Footer
             };
 
             using (var client = new SmtpClient())

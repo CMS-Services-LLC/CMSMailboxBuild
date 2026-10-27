@@ -33,7 +33,15 @@
         /* Idle-timeout warning (see the session section of the script). */
         #idleWarning { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 10000; align-items: center; justify-content: center; }
         #idleWarning > div { background: #fff; border-radius: 6px; padding: 22px 26px; text-align: center; box-shadow: 0 4px 20px rgba(0,0,0,0.3); min-width: 300px; }
-        #layout { display: flex; height: calc(100vh - 44px); }
+        /* 44px top bar + the fixed #siteFooter (60px) at the bottom. */
+        #layout { display: flex; height: calc(100vh - 44px - 60px); }
+        /* Site-wide footer, fixed to the bottom of every screen. Fixed row heights so
+           #layout above can subtract exactly 60px. Fullscreen IA records cover it. */
+        #siteFooter { position: fixed; left: 0; right: 0; bottom: 0; height: 60px; z-index: 50; border-top: 3px solid #015390; box-sizing: border-box; text-align: center; }
+        #siteFooter .sfTop { height: 39px; background: #f8fafc; display: flex; align-items: center; justify-content: center; gap: 8px; }
+        #siteFooter .sfTop span { font-size: 13px; color: #333; font-weight: 600; }
+        #siteFooter .sfTop a { display: inline-block; background: #015390; color: #fff; padding: 5px 16px; font-size: 13px; font-weight: bold; text-decoration: none; border-radius: 4px; }
+        #siteFooter .sfBottom { height: 18px; line-height: 18px; background: #015390; color: #fff; font-size: 10px; }
         /* #listPane = folder tabs on top + the scrolling message list below. The width/
            background/border that used to live on #inboxList moved up to the wrapper. */
         #listPane { width: 320px; display: flex; flex-direction: column; background: #fff; border-right: 1px solid #ddd; min-height: 0; }
@@ -232,6 +240,14 @@
             </div>
             <div id="messagePane"><p class="hint" style="padding:10px">Select a message.</p></div>
         </div>
+    </div>
+
+    <div id="siteFooter">
+        <div class="sfTop">
+            <span>Access full CMS operations &rarr;</span>
+            <a href="https://portal.cms-services.net" target="_blank" rel="noopener">Log In to Portal</a>
+        </div>
+        <div class="sfBottom">CMS Secure Email &nbsp;&middot;&nbsp; Confidential &ndash; intended only for the named recipient(s).</div>
     </div>
 
     <div id="mbxFullscreenBar">
