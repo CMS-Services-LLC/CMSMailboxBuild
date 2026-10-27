@@ -23,8 +23,8 @@ namespace CMSMailbox.Controllers
             int uid = CurrentUID();
             if (uid == 0) return Unauthorized();
 
-            // Gate 1: this item must belong to a message this UID actually received, or its task
-            // was shared with them by its assignee (sql/028 MBX_CanOpenItem).
+            // Gate 1: this item must belong to a message this UID actually received or sent (sql/033),
+            // or its task was shared with them by its assignee (sql/028 MBX_CanOpenItem).
             var lookup = DB.GetDB(
                 "select mi.ItemType, mi.ItemID, mi.FormID from MBX_MessageItem mi " +
                 "where mi.MessageItemID = @messageItemId and dbo.MBX_CanOpenItem(mi.MessageItemID, @uid) = 1",

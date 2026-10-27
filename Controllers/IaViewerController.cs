@@ -513,7 +513,7 @@ namespace CMSMailbox.Controllers
         private ItemContext ResolveAndGateByMessageItem(int messageItemId, int uid)
         {
             var lookup = DB.GetDB(
-                // A recipient, or a colleague the item's task was shared with by its assignee (sql/028).
+                // A recipient, the sender (sql/033), or a colleague the item's task was shared with by its assignee (sql/028).
                 "select mi.ItemType, mi.ItemID, mi.FormID from MBX_MessageItem mi " +
                 "where mi.MessageItemID = @messageItemId and dbo.MBX_CanOpenItem(mi.MessageItemID, @uid) = 1",
                 uid, "{\"messageItemId\":" + messageItemId + "}");
