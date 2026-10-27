@@ -724,6 +724,8 @@
                     var area = document.getElementById("threadArea");
                     if (!area) return;
                     var msgs = JSON.parse(res.messages), atts = JSON.parse(res.attachments);
+                    // Newest first.
+                    msgs.sort(function (a, b) { return (new Date(b.DTCreated) - new Date(a.DTCreated)) || (b.MessageID - a.MessageID); });
                     area.innerHTML = (msgs.length > 1 ? "<div class='hint' style='margin-bottom:6px'>Conversation &middot; " + msgs.length + " messages</div>" : "") +
                         msgs.map(function (m) {
                             return threadCardHtml(m, atts.filter(function (a) { return a.MessageID === m.MessageID; }), m.MessageID === messageId);
