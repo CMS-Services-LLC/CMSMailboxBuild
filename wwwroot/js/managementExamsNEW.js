@@ -3576,11 +3576,11 @@ function ExamWorkflow(ExamID, xCID) {
     loadExamWorkflow(ExamID, xCID);
 }
 
-var MgtWorkflowRows = []; // last _MgtGetWorkflow result; the Show filter re-renders from it
-var MgtWorkflowOpen = []; // ActionIDs whose details are expanded (kept across filter changes and Refresh)
+var MgtWorkflowRows = []; // last _MgtGetWorkflowLines result; the Show filter re-renders from it
+var MgtWorkflowOpen = []; // LineIDs whose details are expanded (kept across filter changes and Refresh)
 
 function loadExamWorkflow(ExamID, xCID) {
-    getData(null, newFormData("_MgtGetWorkflow", { examid: ExamID, xcid: xCID }), function (vr) {
+    getData(null, newFormData("_MgtGetWorkflowLines", { examid: ExamID, xcid: xCID }), function (vr) {
         var js = jparse(vr);
         if (!wfWin || wfWin.closed) { return; } //tab closed
         var block = wfDoc.getElementById("wfList");
@@ -3592,9 +3592,32 @@ function loadExamWorkflow(ExamID, xCID) {
             mgtWorkflowError("Unable to load the workflow.");
             return;
         }
-        MgtWorkflowRows = js.filter(d => d.ActionID);
+        MgtWorkflowRows = js.filter(d => d.LineID);
         renderExamWorkflow();
     });
+}
+
+// _MgtGetWorkflowLines rows (in exam order) -> one entry per question, with its remediations (in the
+// order they were set) and the combined timeline. Shared by the tab; the PDF groups the same way server-side.
+function mgtWorkflowGroupByLine(js) {
+    var lines = [];
+    js.forEach(function (r) {
+        var ln = lines.find(l => l.LineID == r.LineID);
+        if (!ln) {
+            ln = { LineID: r.LineID, Module: r.Module, ModNum: r.ModNum, QuestNum: r.QuestNum, Question: r.Question, rems: [], events: [] };
+            lines.push(ln);
+        }
+        ln.events.push(r);
+        if (r.ActionID && !ln.rems.find(a => a.ActionID == r.ActionID)) {
+            ln.rems.push({ ActionID: r.ActionID, RemediationText: r.RemediationText, Status: r.Status, DTSet: r.DTSet,
+                SetByName: r.SetByName, DTCompleted: r.DTCompleted, CompletedByName: r.CompletedByName, CompletedTimeKnown: r.CompletedTimeKnown });
+        }
+    });
+    lines.forEach(function (ln) {
+        ln.rems.sort((a, b) => (a.DTSet < b.DTSet) ? -1 : (a.DTSet > b.DTSet) ? 1 : a.ActionID - b.ActionID);
+        ln.pending = ln.rems.filter(a => a.Status == "Pending").length;
+    });
+    return lines;
 }
 
 function renderExamWorkflow() {
@@ -3603,33 +3626,31 @@ function renderExamWorkflow() {
     block.innerHTML = "";
     var sum = wfDoc.getElementById("wfSummary");
     sum.textContent = "";
-    var js = MgtWorkflowRows;
 
-    if (js.length == 0) {
+    var lines = mgtWorkflowGroupByLine(MgtWorkflowRows);
+    if (lines.length == 0) {
         mgtWorkflowNote(block, "No workflow actions for this exam and company.");
         return;
     }
 
-    // one card per action, events in order; DOM/textContent because answers and remediation text are user-entered
-    var actionIDs = [];
-    js.forEach(d => { if (actionIDs.indexOf(d.ActionID) == -1) actionIDs.push(d.ActionID); });
-
-    var pending = actionIDs.filter(id => js.find(d => d.ActionID == id).Status == "Pending").length;
-    sum.textContent = actionIDs.length + " action(s): " + pending + " pending, " + (actionIDs.length - pending) + " complete";
+    // status is by question: Pending until every remediation set on it has been removed (John, 2026-10-27)
+    var remCount = lines.reduce((n, l) => n + l.rems.length, 0);
+    var linesPending = lines.filter(l => l.pending > 0).length;
+    sum.textContent = lines.length + " question(s): " + linesPending + " pending, " + (lines.length - linesPending) + " complete" +
+        "  ·  " + remCount + " remediation(s)";
 
     var filter = wfDoc.getElementById("wfFilter");
     if (filter && filter.value == "pending") {
-        actionIDs = actionIDs.filter(id => js.find(d => d.ActionID == id).Status == "Pending");
-        if (actionIDs.length == 0) {
+        lines = lines.filter(l => l.pending > 0);
+        if (lines.length == 0) {
             mgtWorkflowNote(block, "No pending actions.");
             return;
         }
     }
 
-    actionIDs.forEach(function (id) {
-        var rows = js.filter(d => d.ActionID == id);
-        var a = rows[0];
-
+    // one card per question (exam order); DOM/textContent because answers and remediation text are user-entered
+    lines.forEach(function (ln) {
+        var id = ln.LineID;
         var card = wfDoc.createElement("div");
         card.style.cssText = "border:solid 1px #ddd;border-radius:4px;margin-bottom:10px;padding:8px 10px;font-size:13px";
 
@@ -3637,27 +3658,39 @@ function renderExamWorkflow() {
         hd.style.cssText = "display:flex;justify-content:space-between;gap:10px";
         var ttl = wfDoc.createElement("div");
         ttl.style.fontWeight = "bold";
-        ttl.textContent = (a.ModNum || "") + "." + (a.QuestNum || "") + " " + (a.Module || "");
-        var badge = wfDoc.createElement("span");
-        badge.textContent = a.Status;
-        badge.style.cssText = "padding:1px 8px;border-radius:10px;font-size:12px;white-space:nowrap;" +
-            ((a.Status == "Pending") ? "background-color:#fff4d6;color:#8a6100" : "background-color:#dff3e3;color:#1d6b33");
+        ttl.textContent = (ln.ModNum || "") + "." + (ln.QuestNum || "") + " " + (ln.Module || "");
         hd.appendChild(ttl);
-        hd.appendChild(badge);
+        hd.appendChild(mgtWorkflowBadge((ln.pending > 0) ? "Pending" : "Complete"));
         card.appendChild(hd);
 
-        if (a.Question) {
+        if (ln.Question) {
             var q = wfDoc.createElement("div");
             q.style.cssText = "color:#555;margin:3px 0";
-            q.textContent = a.Question;
+            q.textContent = ln.Question;
             card.appendChild(q);
         }
-        var rem = wfDoc.createElement("div");
-        rem.style.cssText = "margin:3px 0";
-        rem.textContent = "Remediation: " + (a.RemediationText || "");
-        card.appendChild(rem);
 
-        // event lines are hidden until the "Show details" line is clicked (arrow on the far right)
+        // each distinct remediation on the question once, with when it was set / removed (the status is the
+        // question's, above). One set and removed several times is one row; every cycle is in the timeline.
+        var groups = mgtWorkflowRemGroups(ln.rems);
+        var lbl = wfDoc.createElement("div");
+        lbl.style.cssText = "margin:6px 0 2px 0;font-weight:bold";
+        lbl.textContent = (groups.length == 1) ? "Remediation:" : "Remediations (" + groups.length + "):";
+        card.appendChild(lbl);
+        var list = wfDoc.createElement("table");
+        list.style.cssText = "width:100%;border-collapse:collapse";
+        groups.forEach(function (g) {
+            var tr = list.insertRow();
+            var tdTxt = tr.insertCell();
+            tdTxt.textContent = g.text;
+            tdTxt.style.cssText = "padding:2px 6px 2px 12px;vertical-align:top";
+            var tdWhen = tr.insertCell();
+            tdWhen.textContent = mgtWorkflowRemHistory(g.rems);
+            tdWhen.style.cssText = "padding:2px 6px;color:#555;vertical-align:top;font-size:12px";
+        });
+        card.appendChild(list);
+
+        // the combined timeline is hidden until the "Show details" line is clicked (arrow on the far right)
         var open = MgtWorkflowOpen.indexOf(id) > -1;
         var tog = wfDoc.createElement("div");
         tog.style.cssText = "display:flex;justify-content:space-between;align-items:center;margin-top:6px;padding:4px 6px;" +
@@ -3675,7 +3708,7 @@ function renderExamWorkflow() {
         function setOpen(o) {
             open = o;
             tbl.style.display = (open) ? "" : "none";
-            togTxt.textContent = ((open) ? "Hide details" : "Show details") + " (" + rows.length + ")";
+            togTxt.textContent = ((open) ? "Hide details" : "Show details") + " (" + ln.events.length + ")";
             togArrow.textContent = (open) ? "▲" : "▼";
             MgtWorkflowOpen = MgtWorkflowOpen.filter(x => x != id);
             if (open) { MgtWorkflowOpen.push(id); }
@@ -3683,15 +3716,10 @@ function renderExamWorkflow() {
         tog.onclick = function () { setOpen(!open); };
         setOpen(open);
 
-        rows.forEach(function (e) {
+        ln.events.forEach(function (e) {
             var tr = tbl.insertRow();
             var by = (e.ActorName || "") + ((e.ActorCompany) ? " (" + e.ActorCompany + ")" : "");
-            var detail = (e.NewText || e.OldText || "");
-            if (e.EventType == "answer_edited" && e.OldText) { detail = e.OldText + "  →  " + (e.NewText || ""); }
-            if (e.EventType.indexOf("remediation_") == 0 && e.EventType != "remediation_edited") { detail = ""; }
-            if (e.Note) { detail = (detail ? detail + " " : "") + "[" + e.Note + "]"; }
-
-            [mgtWorkflowDT(e.DTEvent), MgtWorkflowEventNames[e.EventType] || e.EventType, by, detail].forEach(function (v, i) {
+            [mgtWorkflowDT(e.DTEvent), MgtWorkflowEventNames[e.EventType] || e.EventType, by, mgtWorkflowDetail(e)].forEach(function (v, i) {
                 var td = tr.insertCell();
                 td.textContent = v;
                 td.style.cssText = "padding:3px 6px;border-top:solid 1px #eee;vertical-align:top" +
@@ -3701,6 +3729,52 @@ function renderExamWorkflow() {
         card.appendChild(tbl);
         block.appendChild(card);
     });
+}
+
+// a question's remediations (sorted by DTSet) grouped by their text, in the order each was first set
+function mgtWorkflowRemGroups(rems) {
+    var groups = [];
+    rems.forEach(function (a) {
+        var key = (a.RemediationText || "").trim().toLowerCase();
+        var g = groups.find(x => x.key == key);
+        if (!g) { g = { key: key, text: a.RemediationText || "", rems: [] }; groups.push(g); }
+        g.rems.push(a);
+    });
+    return groups;
+}
+
+// "Set ... by ...; removed ... by ..." for one remediation; for one set more than once:
+// "Set 5 times, first ..., last ... by ...; last removed ... by ..." (or "; still set")
+// (the PDF builder mirrors this)
+function mgtWorkflowRemHistory(rems) {
+    var last = rems[rems.length - 1];
+    var removed = (last.Status == "Complete")
+        ? "removed " + ((last.CompletedTimeKnown) ? mgtWorkflowDT(last.DTCompleted) : "(time not recorded)") +
+          ((last.CompletedByName) ? " by " + last.CompletedByName : "")
+        : "";
+    if (rems.length == 1) {
+        return "Set " + mgtWorkflowDT(last.DTSet) + ((last.SetByName) ? " by " + last.SetByName : "") + ((removed) ? "; " + removed : "");
+    }
+    return "Set " + rems.length + " times, first " + mgtWorkflowDT(rems[0].DTSet) + ", last " + mgtWorkflowDT(last.DTSet) +
+        ((last.SetByName) ? " by " + last.SetByName : "") + ((removed) ? "; last " + removed : "; still set");
+}
+
+// what an event row says in the Detail column (the PDF builder mirrors this)
+function mgtWorkflowDetail(e) {
+    var detail = (e.NewText || e.OldText || "");
+    if (e.EventType == "answer_edited" && e.OldText) { detail = e.OldText + "  →  " + (e.NewText || ""); }
+    // with several remediations on one question, the remediation rows name which one
+    if (e.EventType == "remediation_set" || e.EventType == "remediation_removed") { detail = e.RemediationText || ""; }
+    if (e.Note) { detail = (detail ? detail + " " : "") + "[" + e.Note + "]"; }
+    return detail;
+}
+
+function mgtWorkflowBadge(status, text) {
+    var b = wfDoc.createElement("span");
+    b.textContent = text || status;
+    b.style.cssText = "padding:1px 8px;border-radius:10px;font-size:12px;white-space:nowrap;" +
+        ((status == "Pending") ? "background-color:#fff4d6;color:#8a6100" : "background-color:#dff3e3;color:#1d6b33");
+    return b;
 }
 
 function mgtWorkflowError(msg) {

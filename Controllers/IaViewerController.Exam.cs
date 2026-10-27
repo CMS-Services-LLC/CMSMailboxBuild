@@ -54,6 +54,8 @@ namespace CMSMailbox.Controllers
             // task's examid/xcid below. _MgtGetWorkflowStatus can create + back-fill the
             // workflow on first open, the same as opening the exam in CMSNEO.
             "_MgtGetWorkflowStatus", "_MgtGetWorkflow", "_MgtGetWorkflowRecentRemoval", "_MgtGetWorkflowRecipients",
+            // the report by question, in exam order (CMS sql 006; _MgtGetWorkflow stays for older pages)
+            "_MgtGetWorkflowLines",
             // Document request "+" > From CMS: the caller's own CMS files for the examined
             // company. Only while the task can still change, and the file cache is rebuilt
             // first (see ExamAdHoc).
