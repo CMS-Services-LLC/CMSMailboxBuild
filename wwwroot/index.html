@@ -122,30 +122,24 @@
            the iframe posts us a message when a popup opens/closes and we grow the
            IFRAME ELEMENT ITSELF to fill the viewport instead — see the message
            listener below. */
-        /* top starts at 50px, not 0 — InteractiveForm.js's own "Additional Actions"/
-           Save button row (#dispButtons, float:right near the top of the record) would
-           otherwise render directly under our fixed Exit Fullscreen button once the
-           iframe covers the whole viewport. Reserving this strip keeps the iframe's
-           own content entirely below our controls instead of guessing at exact
-           overlap pixels. */
+        /* top starts at 50px, not 0 — that strip is #mbxFullscreenBar's (the Close /
+           Save buttons), so the record's own content always sits entirely below it. */
         .mbx-iframe-fullscreen { position: fixed !important; top: 50px !important; left: 0 !important; width: 100vw !important; height: calc(100vh - 50px) !important; z-index: 99999; margin: 0 !important; border: none !important; background: #fff; }
-        /* Sits above the fullscreened iframe (z-index 99999) as a manual escape hatch —
-           the iframe's own PopUp() close button is the normal way out, but this covers
-           any close path inside that ported code that doesn't route through
-           mbxNotifyPopupState (e.g. navigating away within the iframe without closing
-           the modal first). */
-        /* #c0392b (matches .err elsewhere in this app) instead of #topBar's own navy —
-           the button previously used the exact same navy/white as #topBar behind it
-           and was nearly invisible sitting on top of it. */
-        #mbxExitFullscreenBtn { display: none; position: fixed; top: 12px; right: 12px; z-index: 100000; background: #c0392b; color: #fff; border: none; border-radius: 4px; padding: 8px 14px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.4); font-weight: bold; }
-        /* While any iframe is fullscreen, the reserved 50px top strip (see
-           .mbx-iframe-fullscreen) is the only part of the underlying page still
-           showing — if an itemCard's header happens to render within that strip
-           (e.g. a short message body puts the card near the very top), its own
-           "View Fullscreen" button visibly peeks out next to Exit Fullscreen.
-           Hiding all item headers while fullscreen is simpler and more robust than
-           trying to compute whether a given card's header falls in that strip. */
-        body.mbx-fullscreen-active .mbx-item-header { visibility: hidden; }
+        /* Exams and form applications show in a message as one summary line with an
+           Open button; the record itself only ever opens fullscreen (mbxOpenItem). */
+        .mbx-item-line { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+        .mbx-item-line .mbx-item-details { min-width: 0; }
+        .mbx-item-line .mbx-item-sub { color: #5f6368; font-size: 13px; margin-top: 2px; }
+        /* The fullscreen record's controls, in the reserved 50px strip above it:
+           Close without saving + the record's own save buttons (mirrored from inside
+           the frame — see mbxSyncSaveButtons), or just Close for an exam. */
+        #mbxFullscreenBar { display: none; position: fixed; top: 0; left: 0; right: 0; height: 50px; z-index: 100000; background: #fff; border-bottom: 1px solid #ccc; box-shadow: 0 2px 6px rgba(0,0,0,0.15); align-items: center; gap: 10px; padding: 0 12px; box-sizing: border-box; }
+        body.mbx-fullscreen-active #mbxFullscreenBar { display: flex; }
+        #mbxFullscreenTitle { flex: 1; min-width: 0; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        #mbxFullscreenUnsaved { display: none; color: #c0392b; font-weight: bold; font-size: 13px; white-space: nowrap; }
+        #mbxFullscreenBar .hint { white-space: nowrap; }
+        #mbxCloseBtn { background: #c0392b; color: #fff; border: none; border-radius: 4px; padding: 8px 14px; cursor: pointer; font-weight: bold; white-space: nowrap; }
+        #mbxFullscreenSaves button { margin-left: 6px; white-space: nowrap; }
         /* #topBar is a normal-flow element at the very top of the page — its own
            "Log Out" button (justify-content:space-between pushes it to the right
            edge) sits almost exactly where our fixed Exit Fullscreen button does,
@@ -235,7 +229,13 @@
         </div>
     </div>
 
-    <button id="mbxExitFullscreenBtn" onclick="mbxExitFullscreen()">Exit Fullscreen</button>
+    <div id="mbxFullscreenBar">
+        <span id="mbxFullscreenTitle"></span>
+        <span id="mbxFullscreenUnsaved">&#9679; Unsaved changes</span>
+        <span id="mbxFullscreenHint" class="hint"></span>
+        <button id="mbxCloseBtn" onclick="mbxCloseItem()">Close</button>
+        <span id="mbxFullscreenSaves"></span>
+    </div>
 
     <script>
         var apiBase = "";
@@ -943,7 +943,6 @@
                     var items = JSON.parse(res.items);
                     renderMessage(msg, items);
                     loadDRViewers();
-                    fitExamFrames();
                     loadInbox(); // refresh read/unread state
                 })
                 .catch(function () {
@@ -1049,14 +1048,8 @@
                         itemsArea.appendChild(card);
                         return;
                     }
-                    card.innerHTML = taskBanner(item) + originBannerHtml(item) + reviewBarHtml(item) +
-                        "<div class='mbx-item-header' style='display:flex;justify-content:space-between;align-items:center'>" +
-                        "<strong>" + escapeHtml(item.ItemLabel || "Form Application Record") + "</strong>" +
-                        "<button class='secondary' onclick='mbxEnterFullscreen(this)'>View Fullscreen</button>" +
-                        "</div>" +
-                        "<iframe src='ia-viewer.html?messageItemId=" + item.MessageItemID + "' " +
-                        "style='width:100%;height:450px;border:1px solid #ccc;margin-top:8px;display:block' " +
-                        "title='" + escapeHtml(item.ItemLabel || "Form Application Record") + "'></iframe>";
+                    card.setAttribute("data-task-status", item.TaskStatus || "");
+                    card.innerHTML = taskBanner(item) + originBannerHtml(item) + reviewBarHtml(item) + formLineHtml(item);
                     itemsArea.appendChild(card);
                 } else if (item.ItemType === "ExamTask") {
                     // Exam task (sql/019): CMSNEO's own exam viewer, ported into
@@ -1093,7 +1086,9 @@
         // were sent with "Require my review" (sql/009), a finished task gets a
         // Mark as Completed button.
         function senderCardHtml(item) {
-            var html = taskBanner(item) + originBannerHtml(item) + "<strong>" + escapeHtml(item.ItemLabel || item.ItemType) + "</strong>";
+            var isExam = item.ItemType === "ExamTask" || item.ItemType === "ExamRef";
+            var html = taskBanner(item) + originBannerHtml(item) +
+                (isExam ? examFrameHtml(item, true) : "<strong>" + escapeHtml(item.ItemLabel || item.ItemType) + "</strong>");
             if (item.IsAssigner && item.TaskStatus === "Pending Review") {
                 html += "<p class='hint'>The assignee has finished this task. Check it in CMSNEO, then mark it completed.</p>" +
                     "<button class='primary' id='reviewBtn_" + item.MessageItemID + "' onclick='reviewTask(" + item.MessageItemID + ")'>Mark as Completed</button>" +
@@ -1102,7 +1097,6 @@
                 html += "<p class='hint'>Attached to this message. Open it from the message you received, or in CMSNEO.</p>";
             }
             if (isOpenableReport(item)) html += drViewerHtml(item.MessageItemID);
-            if (item.ItemType === "ExamTask" || item.ItemType === "ExamRef") html += examFrameHtml(item, true, true);
             return html;
         }
 
@@ -1229,9 +1223,11 @@
                         }
                         var banner = card.querySelector(".taskBanner");
                         if (banner) banner.outerHTML = taskBanner(item);
+                        // A new-record task's first save gives the line its record ID.
+                        var line = card.querySelector(".mbx-item-line");
+                        if (line && item.ItemType === "IAFormRecord" && !card.querySelector("iframe")) line.outerHTML = formLineHtml(item);
                     });
                     loadDRViewers();
-                    fitExamFrames(); // a re-rendered card's exam frame starts at its default height
                 })
                 .catch(function () { /* the cards just keep their previous status */ });
         }
@@ -1272,48 +1268,38 @@
         // its values (editable when it's your own company's row, read-only otherwise),
         // notes, and attachments. Every request is access-checked server-side.
 
-        // An exam frame takes exactly the space left in the message pane below it
-        // (above the reply box), so the message itself doesn't scroll and push its
-        // header off-screen — the exam's own question list scrolls instead. Never
-        // smaller than MIN_EXAM_FRAME; re-fitted when the window is resized.
-        var MIN_EXAM_FRAME = 320;
-        function fitExamFrames() {
-            var pane = document.getElementById("messagePane");
-            var scroller = document.getElementById("messageScroll");
-            var reply = document.getElementById("replyBox");
-            if (!pane || !scroller) return;
-            var frames = Array.prototype.filter.call(
-                document.querySelectorAll("#messageScroll iframe.mbx-exam-frame"),
-                function (f) { return !f.classList.contains("mbx-iframe-fullscreen"); });
-            if (frames.length === 0) return;
-            // The height #messageScroll can have without scrolling.
-            var room = pane.clientHeight - (reply ? reply.offsetHeight : 0);
-            // First pass: give the (last) exam frame everything below its top edge.
-            var frame = frames[frames.length - 1];
-            var top = frame.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
-            frame.style.height = Math.max(MIN_EXAM_FRAME, Math.floor(room - top)) + "px";
-            // Second pass: whatever still overflows (the frame's border, the card's
-            // padding and margin below it, ...) is measured, not guessed, and trimmed.
-            var over = scroller.scrollHeight - room;
-            if (over > 0) frame.style.height = Math.max(MIN_EXAM_FRAME, frame.offsetHeight - over - 2) + "px";
+        // An exam as one summary line: its name, the management company that owns it
+        // and the examined (target) company (sql/032; older rows fall back to the
+        // item's label), with an Open button that opens exam-viewer.html fullscreen.
+        // Which view it opens in — the assignee's or the assigner's management view —
+        // is decided server-side (IaViewerController.Exam.cs); withFrame false leaves
+        // out the Open button.
+        function examFrameHtml(item, withFrame) {
+            var title = item.ExamName ? "Exam: " + item.ExamName : (item.ItemLabel || "Exam");
+            var sub = item.ExamName
+                ? "Management: " + escapeHtml(item.ExamMgtCompany || "-") + " &middot; Target: " + escapeHtml(item.ExamCompany || "-")
+                : "";
+            var html = itemLineHtml(item, "exam", title, sub, withFrame);
+            if (!withFrame) html += "<p class='hint'>This task is assigned to someone else.</p>";
+            return html;
         }
-        window.addEventListener("resize", fitExamFrames);
 
-        // An exam in its frame (exam-viewer.html). Which view it opens in — the
-        // assignee's or the assigner's management view — is decided server-side
-        // (IaViewerController.Exam.cs); withFrame false shows just the label.
-        // noHeader leaves out the label row when the caller already printed it.
-        function examFrameHtml(item, withFrame, noHeader) {
-            var label = escapeHtml(item.ItemLabel || "Exam");
-            var html = noHeader ? "" :
-                "<div class='mbx-item-header' style='display:flex;justify-content:space-between;align-items:center'>" +
-                "<strong>" + label + "</strong>" +
-                (withFrame ? "<button class='secondary' onclick='mbxEnterFullscreen(this)'>View Fullscreen</button>" : "") +
+        // A form application as one summary line: its label and record ID, with an
+        // Open button that opens ia-viewer.html fullscreen. A task item that hasn't
+        // been started (ItemID "0") opens the viewer in new-record mode.
+        function formLineHtml(item) {
+            var started = item.ItemID && String(item.ItemID) !== "0";
+            return itemLineHtml(item, "form", item.ItemLabel || "Form Application Record",
+                started ? "Record ID: " + escapeHtml(String(item.ItemID)) : "New record - not saved yet", true);
+        }
+
+        // kind "form" | "exam"; sub is already-escaped HTML.
+        function itemLineHtml(item, kind, title, sub, canOpen) {
+            return "<div class='mbx-item-line' data-kind='" + kind + "' data-msg-item='" + item.MessageItemID + "' data-title='" + escapeHtml(title) + "'>" +
+                "<div class='mbx-item-details'><strong>" + escapeHtml(title) + "</strong>" +
+                (sub ? "<div class='mbx-item-sub'>" + sub + "</div>" : "") + "</div>" +
+                (canOpen ? "<button class='primary' onclick='mbxOpenItem(this)'>Open</button>" : "") +
                 "</div>";
-            if (!withFrame) return html + "<p class='hint'>This task is assigned to someone else.</p>";
-            if (noHeader) html += "<div style='text-align:right'><button class='secondary' onclick='mbxEnterFullscreen(this)'>View Fullscreen</button></div>";
-            return html + "<iframe class='mbx-exam-frame' src='exam-viewer.html?messageItemId=" + item.MessageItemID + "' " +
-                "style='width:100%;height:550px;border:1px solid #ccc;margin-top:8px;display:block' title='" + label + "'></iframe>";
         }
 
         function isOpenableReport(item) {
@@ -1725,94 +1711,158 @@
                 .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
         }
 
-        // Companion to ia-viewer.html's mbxNotifyPopupState() (js/newOpts.js) — that
-        // iframe can't make its own popups escape its box, so instead it tells us
-        // when one opens/closes and we grow the <iframe> ELEMENT itself to fill the
-        // viewport. event.source (not an id) identifies which iframe sent it, since
-        // a message can be open with several IAFormRecord items/iframes on screen.
+        // Exams and form applications open only fullscreen (mbxOpenItem): the frame is
+        // created on Open and removed again on Close / after a save, so a message
+        // never holds a half-edited record out of sight. The bar above it
+        // (#mbxFullscreenBar) has Close without saving + the record's own save buttons
+        // for a form, or just Close for an exam (its answers save as they're typed).
         var mbxFullscreenFrame = null;
-        // True once fullscreen was entered via the "View Fullscreen" button rather
-        // than a popup — while true, an internal popup opening/closing (View PDF, a
-        // confirm dialog, the attachment viewer — ViewDisp()'s UI has several) must
-        // NOT auto-exit fullscreen on its own "closed" message; only the explicit
-        // Exit Fullscreen button should end a manually-entered fullscreen.
-        var mbxManualFullscreen = false;
+        var mbxSaveObserver = null;
 
-        // Single choke point for entering/exiting the fullscreen visual state, so
-        // the frame class, the Exit button, and hiding itemCard headers (see the
-        // .mbx-item-header CSS comment) can never drift out of sync across the four
-        // places fullscreen can be triggered/ended (a popup opening, a popup closing,
-        // the View Fullscreen button, the Exit Fullscreen button).
+        var mbxPaneObserver = null;
+
         function mbxSetFullscreen(frame) {
             if (mbxFullscreenFrame && mbxFullscreenFrame !== frame) {
                 mbxFullscreenFrame.classList.remove("mbx-iframe-fullscreen");
             }
+            // Opening another message, logging out, ... replace the message pane and
+            // with it the open frame: drop the fullscreen bar along with it.
+            if (!mbxPaneObserver) {
+                mbxPaneObserver = new MutationObserver(function () {
+                    if (mbxFullscreenFrame && !mbxFullscreenFrame.isConnected) mbxClearFullscreen();
+                });
+                mbxPaneObserver.observe(document.getElementById("messagePane"), { childList: true, subtree: true });
+            }
             frame.classList.add("mbx-iframe-fullscreen");
             mbxFullscreenFrame = frame;
             document.body.classList.add("mbx-fullscreen-active");
-            document.getElementById("mbxExitFullscreenBtn").style.display = "block";
         }
 
         function mbxClearFullscreen() {
-            if (mbxFullscreenFrame) mbxFullscreenFrame.classList.remove("mbx-iframe-fullscreen");
+            if (mbxSaveObserver) { mbxSaveObserver.disconnect(); mbxSaveObserver = null; }
+            if (mbxFullscreenFrame) {
+                mbxFullscreenFrame.classList.remove("mbx-iframe-fullscreen");
+                if (mbxFullscreenFrame.classList.contains("mbx-item-frame")) mbxFullscreenFrame.remove();
+            }
             mbxFullscreenFrame = null;
-            mbxManualFullscreen = false;
             document.body.classList.remove("mbx-fullscreen-active");
-            document.getElementById("mbxExitFullscreenBtn").style.display = "none";
+            var saves = document.getElementById("mbxFullscreenSaves");
+            saves.innerHTML = "";
+            saves.removeAttribute("data-sig");
+            document.getElementById("mbxFullscreenUnsaved").style.display = "none";
+        }
+
+        // Open button on an exam/form summary line.
+        function mbxOpenItem(btn) {
+            var line = btn.closest(".mbx-item-line");
+            var card = btn.closest(".itemCard");
+            var kind = line.getAttribute("data-kind");
+            mbxClearFullscreen();
+            var frame = document.createElement("iframe");
+            frame.className = "mbx-item-frame";
+            frame.src = (kind === "exam" ? "exam-viewer.html" : "ia-viewer.html") + "?messageItemId=" + line.getAttribute("data-msg-item");
+            frame.title = line.getAttribute("data-title");
+            card.appendChild(frame);
+            document.getElementById("mbxFullscreenTitle").textContent = line.getAttribute("data-title");
+            // A form's button becomes "Close without saving" only once it has save
+            // buttons to offer (mbxSyncSaveButtons); a view-only record just closes.
+            document.getElementById("mbxCloseBtn").textContent = "Close";
+            document.getElementById("mbxFullscreenHint").textContent = kind === "exam" ? "Your answers are saved as you type them." : "";
+            mbxSetFullscreen(frame);
+            if (kind === "form") frame.addEventListener("load", function () { mbxWatchSaveButtons(frame); });
+        }
+
+        function mbxCloseItem() {
+            var frame = mbxFullscreenFrame;
+            try {
+                if (frame && document.getElementById("mbxFullscreenSaves").children.length &&
+                    frame.contentDocument && frame.contentDocument.body.classList.contains("mbxDirty") &&
+                    !confirm("Close without saving? Your changes to this record will be lost.")) return;
+            } catch (e) { /* not readable yet: nothing to lose */ }
+            var wasExam = !!frame && /exam-viewer/.test(frame.src);
+            mbxClearFullscreen();
+            // An exam's first answer moves its task to Pending Review.
+            if (wasExam) refreshTaskCards();
+        }
+
+        // The form's own save buttons (Save & Review / Save / Save for Use, built by
+        // InteractiveForm.js in #dispButtons) are mirrored into the bar and hidden in
+        // the frame, so their labels, disabled state (required fields) and permission
+        // rules stay exactly CMSNEO's; clicking a copy clicks the original. Re-synced
+        // whenever the frame's DOM changes, as ViewDisp renders asynchronously.
+        function mbxWatchSaveButtons(frame) {
+            var doc;
+            try { doc = frame.contentDocument; } catch (e) { return; }
+            if (!doc || !doc.body) return;
+            if (mbxSaveObserver) mbxSaveObserver.disconnect();
+            var pending = false;
+            mbxSaveObserver = new MutationObserver(function () {
+                if (pending) return;
+                pending = true;
+                setTimeout(function () { pending = false; if (mbxFullscreenFrame === frame) mbxSyncSaveButtons(doc); }, 50);
+            });
+            mbxSaveObserver.observe(doc.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["disabled", "class", "title"] });
+            mbxSyncSaveButtons(doc);
+        }
+
+        function mbxSyncSaveButtons(doc) {
+            // .btnIASave only: the greyed "Save for Use" InteractiveForm.js shows a user
+            // without release permission isn't a save button they have.
+            var originals = Array.prototype.filter.call(doc.querySelectorAll("#dispButtons > button.btnIASave"), function (b) {
+                return /^\s*Save/i.test(b.textContent);
+            });
+            Array.prototype.forEach.call(doc.querySelectorAll("#dispButtons > button:not(.btnIASave)"), function (b) {
+                if (/^\s*Save/i.test(b.textContent) && b.style.display !== "none") b.style.display = "none";
+            });
+            document.getElementById("mbxCloseBtn").textContent = originals.length ? "Close without saving" : "Close";
+            var holder = document.getElementById("mbxFullscreenSaves");
+            var sig = originals.map(function (b) { return b.textContent + "|" + b.disabled + "|" + b.title; }).join("~");
+            if (holder.getAttribute("data-sig") !== sig) {
+                holder.setAttribute("data-sig", sig);
+                holder.innerHTML = "";
+                originals.forEach(function (b) {
+                    var copy = document.createElement("button");
+                    copy.className = "primary";
+                    copy.textContent = b.textContent.trim();
+                    copy.disabled = b.disabled;
+                    copy.title = b.title || "";
+                    copy.onclick = function () { b.click(); };
+                    holder.appendChild(copy);
+                });
+            }
+            originals.forEach(function (b) { if (b.style.display !== "none") b.style.display = "none"; });
+            document.getElementById("mbxFullscreenUnsaved").style.display = doc.body.classList.contains("mbxDirty") ? "inline" : "none";
         }
 
         window.addEventListener("message", function (event) {
             if (event.origin !== window.location.origin) return;
             if (event.data && event.data.mbxActivity) { resetIdle(); return; }
-            // ia-viewer.html's mbxRecordSaved(): a record was just saved. Reload only
-            // that iframe (a new-record task's item now points at the saved record)
-            // and refresh the task lines — not the whole message, whose other forms
-            // may have unsaved input.
+            // ia-viewer.html's mbxRecordSaved(): a record was just saved. Close it
+            // (back to its summary line) and refresh the task lines and that line's
+            // record ID — not the whole message.
             if (event.data && event.data.mbxRecordSaved) {
-                var saved = document.querySelectorAll("#messagePane iframe");
-                for (var j = 0; j < saved.length; j++) {
-                    if (saved[j].contentWindow === event.source) {
-                        if (mbxFullscreenFrame === saved[j]) mbxClearFullscreen();
-                        saved[j].src = saved[j].src;
-                        break;
-                    }
-                }
+                if (mbxFullscreenFrame && mbxFullscreenFrame.contentWindow === event.source) mbxClearFullscreen();
                 refreshTaskCards();
                 return;
             }
+            // ia-viewer.html's mbxNotifyPopupState() (js/newOpts.js): a frame can't make
+            // its own popups escape its box, so a popup opening in a frame that isn't
+            // fullscreen grows the frame to fill the viewport until it closes. Item
+            // frames are always fullscreen already; this is for any other frame.
             if (!event.data || (event.data.mbxPopup !== "open" && event.data.mbxPopup !== "closed")) return;
-
             var frames = document.querySelectorAll("#messagePane iframe");
             for (var i = 0; i < frames.length; i++) {
                 if (frames[i].contentWindow === event.source) {
+                    if (frames[i].classList.contains("mbx-item-frame")) break;
                     if (event.data.mbxPopup === "open") {
                         mbxSetFullscreen(frames[i]);
-                    } else if (mbxFullscreenFrame === frames[i] && !mbxManualFullscreen) {
+                    } else if (mbxFullscreenFrame === frames[i]) {
                         mbxClearFullscreen();
                     }
                     break;
                 }
             }
         });
-
-        // Lets a user go fullscreen straight away to read/work a record comfortably,
-        // without first having to open some popup inside it just to trigger
-        // mbxNotifyPopupState. `btn` is the clicked button itself — its own itemCard
-        // sibling iframe is the one to fullscreen (a message can have more than one
-        // IAFormRecord item/iframe on screen at once).
-        function mbxEnterFullscreen(btn) {
-            var frame = btn.closest(".itemCard").querySelector("iframe");
-            if (!frame) return;
-            mbxSetFullscreen(frame);
-            mbxManualFullscreen = true;
-        }
-
-        // Manual escape hatch (see the button's CSS comment) — just undoes the visual
-        // fullscreen; it doesn't reach into the iframe to close the popup itself, so
-        // the ported code's own PopUp() state is left alone.
-        function mbxExitFullscreen() {
-            mbxClearFullscreen();
-        }
 
         // One-time handoff codes from CMSNEO's Items Alerted On (sql/011): a 60-second,
         // single-use code for a user CMSNEO has already logged in with the same

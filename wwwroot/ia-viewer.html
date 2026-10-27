@@ -51,6 +51,8 @@
   #mbxUnsavedFlag { display: none; color: #c0392b; font-weight: bold; font-size: 12px; padding-right: 10px; white-space: nowrap; }
   body.mbxDirty #mbxUnsavedFlag { display: inline; }
   body.mbxDirty .btnIASave:not(:disabled) { box-shadow: 0 0 0 3px #f5b041; }
+  /* Inside the mailbox, its fullscreen bar shows the flag and the save buttons. */
+  html.mbxEmbedded #mbxUnsavedFlag { display: none !important; }
 </style>
 </head>
 <body>
@@ -116,6 +118,7 @@
     // record; Save for Use can finish a task); opened on its own, just reload.
     // Clicks inside this frame don't reach index.html, so report them: they reset the
     // mailbox's idle-timeout countdown the same as a click on the page itself.
+    if (window.parent && window.parent !== window) document.documentElement.classList.add("mbxEmbedded");
     document.addEventListener("click", function () {
       if (window.parent && window.parent !== window) {
         window.parent.postMessage({ mbxActivity: true }, window.location.origin);
