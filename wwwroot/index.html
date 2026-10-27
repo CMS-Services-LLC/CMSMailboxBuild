@@ -56,7 +56,15 @@
         #searchBox { flex-shrink: 0; padding: 8px 10px; border-bottom: 1px solid #ddd; display: flex; gap: 6px; align-items: center; }
         #searchBox input { flex: 1; min-width: 0; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; }
         #searchClear { background: none; border: none; color: #777; cursor: pointer; font-size: 16px; display: none; }
-        .msgRow { padding: 10px 14px; border-bottom: 1px solid #eee; cursor: pointer; }
+        .msgRow { padding: 10px 14px; border-bottom: 1px solid #eee; cursor: pointer; display: flex; gap: 8px; align-items: flex-start; }
+        .msgRow .msgBody { flex: 1; min-width: 0; }
+        .msgRow .msgChk { margin: 3px 0 0; flex-shrink: 0; cursor: pointer; }
+        .msgRow.checked { background: #f3f7ff; }
+        /* Multi-select (Inbox and Archived only): select all + bulk Archive / Move to Inbox. */
+        #bulkBar { flex-shrink: 0; padding: 6px 14px; border-bottom: 1px solid #ddd; display: none; align-items: center; gap: 8px; font-size: 13px; color: #555; background: #fafbfd; }
+        #bulkBar label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+        #bulkBar #bulkCount { flex: 1; }
+        #bulkBar button { padding: 3px 10px; font-size: 12px; }
         .msgRow:hover { background: #f0f4fa; }
         .msgRow.unread { font-weight: bold; }
         /* The message open on the right. Inset so the bordered row keeps its size. */
@@ -236,6 +244,11 @@
                         <option value="Completed">Completed</option>
                     </select>
                 </div>
+                <div id="bulkBar">
+                    <label><input type="checkbox" id="bulkAll" onclick="toggleSelectAll(this.checked)" /> Select all</label>
+                    <span id="bulkCount"></span>
+                    <button id="bulkActionBtn" class="secondary" onclick="bulkArchive()" disabled></button>
+                </div>
                 <div id="inboxList"></div>
             </div>
             <div id="messagePane"><p class="hint" style="padding:10px">Select a message.</p></div>
@@ -368,6 +381,7 @@
         function setFolder(folder) {
             currentFolder = folder;
             currentMessageId = null;
+            selectedIds = {};
             ["inbox", "sent", "archived"].forEach(function (f) {
                 document.getElementById("tab_" + f).classList.toggle("active", f === folder);
             });
@@ -888,8 +902,17 @@
                 return terms.every(function (t) { return hay.indexOf(t) > -1; });
             });
 
+            // Checkboxes only where Archive / Move to Inbox applies. Selections that the
+            // filter now hides are dropped, so the bulk action only touches visible rows.
+            var selectable = folder !== "sent";
+            var kept = {};
+            rows.forEach(function (m) { if (selectedIds[m.MessageID]) kept[m.MessageID] = true; });
+            selectedIds = kept;
+            visibleIds = rows.map(function (m) { return m.MessageID; });
+
             var list = document.getElementById("inboxList");
             list.innerHTML = "";
+            updateBulkBar();
             if (rows.length === 0) {
                 var emptyText = (q || taskFilter) ? "No messages match your filter."
                     : { inbox: "No messages.", sent: "No sent messages.", archived: "No archived messages." }[folder];
@@ -914,9 +937,29 @@
                 var clip = m.AttachmentCount > 0
                     ? "<span class='clip' title='" + m.AttachmentCount + (m.AttachmentCount === 1 ? " attachment" : " attachments") + "'>&#128206;</span>"
                     : "";
-                div.innerHTML = "<span class='subj'>" + clip + escapeHtml(m.Subject) + tag + "</span>" +
+                if (selectedIds[m.MessageID]) div.classList.add("checked");
+                div.innerHTML = (selectable ? "<input type='checkbox' class='msgChk' title='Select'" + (selectedIds[m.MessageID] ? " checked" : "") + " />" : "") +
+                    "<div class='msgBody'><span class='subj'>" + clip + escapeHtml(m.Subject) + tag + "</span>" +
                     "<span class='meta'>" + who + " &middot; " +
-                    new Date(m.DTCreated).toLocaleString() + "</span>";
+                    new Date(m.DTCreated).toLocaleString() + "</span></div>";
+                if (selectable) {
+                    var chk = div.querySelector(".msgChk");
+                    chk.onclick = function (e) {
+                        e.stopPropagation();   // ticking a box doesn't open the message
+                        setRowChecked(div, chk.checked);
+                        // Shift+click: same as CMS global.js cbMultiSelect — going upward, set each
+                        // box to this one's state until reaching one that's already in that state.
+                        if (e.shiftKey) {
+                            for (var prev = div.previousElementSibling; prev; prev = prev.previousElementSibling) {
+                                var pc = prev.querySelector(".msgChk");
+                                if (!pc || pc.checked === chk.checked) break;
+                                pc.checked = chk.checked;
+                                setRowChecked(prev, chk.checked);
+                            }
+                        }
+                        updateBulkBar();
+                    };
+                }
                 list.appendChild(div);
             });
         }
@@ -930,7 +973,7 @@
             if (showLoading || folderRows.length === 0) document.getElementById("inboxList").innerHTML = LIST_LOADING_HTML;
             var btn = document.getElementById("refreshBtn");
             if (btn) btn.disabled = true;
-            api("/inbox?folder=" + folder)
+            return api("/inbox?folder=" + folder)
                 .then(function (r) {
                     if (r.status === 401) { logout(); throw new Error("unauthorized"); }
                     return r.text();
@@ -1729,6 +1772,71 @@
                 .catch(function (ex) {
                     if (ex.message !== "unauthorized" && errDiv) errDiv.innerText = "Could not update this message.";
                 });
+        }
+
+        // ---- Multi-select: archive / move to Inbox several messages at once -----------
+        // selectedIds is a set of MessageIDs ticked in the current folder; visibleIds is
+        // what renderList() last drew (after search/filter), for Select all.
+        var selectedIds = {};
+        var visibleIds = [];
+
+        function updateBulkBar() {
+            var bar = document.getElementById("bulkBar");
+            if (currentFolder === "sent" || visibleIds.length === 0) { bar.style.display = "none"; return; }
+            bar.style.display = "flex";
+            var n = Object.keys(selectedIds).length;
+            var all = document.getElementById("bulkAll");
+            all.checked = n > 0 && n === visibleIds.length;
+            all.indeterminate = n > 0 && n < visibleIds.length;
+            document.getElementById("bulkCount").innerText = n ? n + " selected" : "";
+            var btn = document.getElementById("bulkActionBtn");
+            btn.innerText = currentFolder === "archived" ? "Move to Inbox" : "Archive";
+            btn.disabled = n === 0;
+        }
+
+        function setRowChecked(row, on) {
+            var id = Number(row.getAttribute("data-message-id"));
+            if (on) selectedIds[id] = true; else delete selectedIds[id];
+            row.classList.toggle("checked", on);
+        }
+
+        function toggleSelectAll(on) {
+            selectedIds = {};
+            if (on) visibleIds.forEach(function (id) { selectedIds[id] = true; });
+            renderList();
+        }
+
+        // One call per message to the same endpoint archiveCurrent() uses (MBX_MarkArchived
+        // only changes the user's own recipient row). Afterwards anything still in the list
+        // didn't move, e.g. a message shared with you rather than addressed to you.
+        function bulkArchive() {
+            var ids = Object.keys(selectedIds).map(Number);
+            if (!ids.length) return;
+            var archive = currentFolder !== "archived";
+            var btn = document.getElementById("bulkActionBtn");
+            btn.disabled = true;
+            btn.innerText = archive ? "Archiving..." : "Moving...";
+            Promise.all(ids.map(function (id) {
+                return api("/inbox/" + id + "/archive", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ Archived: archive })
+                }).then(function (r) { if (r.status === 401) throw new Error("unauthorized"); return r.ok; })
+                  .catch(function (ex) { if (ex.message === "unauthorized") throw ex; return false; });
+            }))
+                .then(function () {
+                    if (ids.indexOf(currentMessageId) > -1) {
+                        currentMessageId = null;
+                        document.getElementById("messagePane").innerHTML = EMPTY_PANE_HTML;
+                    }
+                    selectedIds = {};
+                    return loadInbox();
+                })
+                .then(function () {
+                    var stuck = ids.filter(function (id) { return folderRows.some(function (m) { return m.MessageID === id; }); });
+                    if (stuck.length) alert(stuck.length + " of " + ids.length + " message(s) couldn't be " + (archive ? "archived" : "moved to the Inbox") + ".");
+                })
+                .catch(function (ex) { if (ex.message === "unauthorized") logout(); else updateBulkBar(); });
         }
 
         function escapeHtml(s) {
