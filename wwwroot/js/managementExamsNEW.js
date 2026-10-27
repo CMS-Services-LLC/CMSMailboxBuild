@@ -3679,6 +3679,7 @@ function renderExamWorkflow() {
         card.appendChild(lbl);
         var list = wfDoc.createElement("table");
         list.style.cssText = "width:100%;border-collapse:collapse";
+        mgtWorkflowFixedCols(list, MgtWorkflowRemCols);
         groups.forEach(function (g) {
             var tr = list.insertRow();
             var tdTxt = tr.insertCell();
@@ -3704,6 +3705,7 @@ function renderExamWorkflow() {
 
         var tbl = wfDoc.createElement("table");
         tbl.style.cssText = "width:100%;border-collapse:collapse;margin-top:2px";
+        mgtWorkflowFixedCols(tbl, MgtWorkflowEventCols);
 
         function setOpen(o) {
             open = o;
@@ -3723,12 +3725,30 @@ function renderExamWorkflow() {
                 var td = tr.insertCell();
                 td.textContent = v;
                 td.style.cssText = "padding:3px 6px;border-top:solid 1px #eee;vertical-align:top" +
-                    ((i < 2) ? ";white-space:nowrap" : "") + ((i == 3) ? ";color:#555" : "");
+                    ((i == 3) ? ";color:#555" : "");
             });
         });
         card.appendChild(tbl);
         block.appendChild(card);
     });
+}
+
+// Every question's tables use the same fixed column widths, so the columns line up from one section to
+// the next (auto layout sized each table to its own content). The remediation list's "Set ... removed ..."
+// column starts where the timeline's Detail column does. The PDF uses the same widths.
+var MgtWorkflowEventCols = ["12%", "18%", "25%", "45%"]; // When, Event, By, Detail
+var MgtWorkflowRemCols = ["55%", "45%"];                 // remediation, set/removed history
+
+function mgtWorkflowFixedCols(table, widths) {
+    table.style.tableLayout = "fixed";
+    table.style.wordWrap = "break-word";
+    var cg = wfDoc.createElement("colgroup");
+    widths.forEach(function (w) {
+        var c = wfDoc.createElement("col");
+        c.style.width = w;
+        cg.appendChild(c);
+    });
+    table.insertBefore(cg, table.firstChild);
 }
 
 // a question's remediations (sorted by DTSet) grouped by their text, in the order each was first set
