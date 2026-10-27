@@ -140,6 +140,11 @@
         #mbxFullscreenBar .hint { white-space: nowrap; }
         #mbxCloseBtn { background: #c0392b; color: #fff; border: none; border-radius: 4px; padding: 8px 14px; cursor: pointer; font-weight: bold; white-space: nowrap; }
         #mbxFullscreenSaves button { margin-left: 6px; white-space: nowrap; }
+        /* Over the fullscreen record while a save runs (mbxStartSaving). */
+        #mbxSavingOverlay { display: none; position: fixed; top: 50px; left: 0; right: 0; bottom: 0; z-index: 100001; background: rgba(255,255,255,0.75); align-items: center; justify-content: center; flex-direction: column; gap: 10px; font-weight: bold; color: #333; }
+        body.mbx-saving #mbxSavingOverlay { display: flex; }
+        body.mbx-saving #mbxFullscreenBar button { pointer-events: none; opacity: 0.5; }
+        #mbxSavedNotice { display: none; position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 100002; background: #1e6b34; color: #fff; padding: 10px 18px; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.3); font-weight: bold; }
         /* #topBar is a normal-flow element at the very top of the page — its own
            "Log Out" button (justify-content:space-between pushes it to the right
            edge) sits almost exactly where our fixed Exit Fullscreen button does,
@@ -236,6 +241,8 @@
         <button id="mbxCloseBtn" onclick="mbxCloseItem()">Close</button>
         <span id="mbxFullscreenSaves"></span>
     </div>
+    <div id="mbxSavingOverlay"><img src="loading.gif" width="32" height="32" alt="" /><div>Saving the record, please wait...</div></div>
+    <div id="mbxSavedNotice"></div>
 
     <script>
         var apiBase = "";
@@ -1739,6 +1746,7 @@
         }
 
         function mbxClearFullscreen() {
+            mbxStopSaving();
             if (mbxSaveObserver) { mbxSaveObserver.disconnect(); mbxSaveObserver = null; }
             if (mbxFullscreenFrame) {
                 mbxFullscreenFrame.classList.remove("mbx-iframe-fullscreen");
@@ -1826,12 +1834,46 @@
                     copy.textContent = b.textContent.trim();
                     copy.disabled = b.disabled;
                     copy.title = b.title || "";
-                    copy.onclick = function () { b.click(); };
+                    copy.onclick = function () { mbxStartSaving(); b.click(); };
                     holder.appendChild(copy);
                 });
             }
             originals.forEach(function (b) { if (b.style.display !== "none") b.style.display = "none"; });
             document.getElementById("mbxFullscreenUnsaved").style.display = doc.body.classList.contains("mbxDirty") ? "inline" : "none";
+        }
+
+        // "Saving..." over the record from the click until the save's own
+        // mbxRecordSaved closes it. A save can also stop without that message — a
+        // dialog inside the record (xconfirm "no assigned fields", an error) that the
+        // user has to answer — so watch for one and step aside; and give up after a
+        // minute rather than block the record forever.
+        var mbxSavingTimer = null;
+        function mbxStartSaving() {
+            mbxStopSaving();
+            document.body.classList.add("mbx-saving");
+            var started = Date.now();
+            mbxSavingTimer = setInterval(function () {
+                if (!mbxFullscreenFrame || Date.now() - started > 60000 || mbxFrameShowsDialog(mbxFullscreenFrame)) mbxStopSaving();
+            }, 300);
+        }
+        function mbxStopSaving() {
+            if (mbxSavingTimer) { clearInterval(mbxSavingTimer); mbxSavingTimer = null; }
+            document.body.classList.remove("mbx-saving");
+        }
+        function mbxFrameShowsDialog(frame) {
+            try {
+                var doc = frame.contentDocument;
+                return Array.prototype.some.call(doc.querySelectorAll("#confirmWindow, #confirmWindow2, .PopUp"), function (el) {
+                    return el.getClientRects().length > 0;   // rendered (not display:none)
+                });
+            } catch (e) { return false; }
+        }
+        function mbxShowSavedNotice(text) {
+            var n = document.getElementById("mbxSavedNotice");
+            n.textContent = text;
+            n.style.display = "block";
+            clearTimeout(n._t);
+            n._t = setTimeout(function () { n.style.display = "none"; }, 3000);
         }
 
         window.addEventListener("message", function (event) {
@@ -1841,7 +1883,10 @@
             // (back to its summary line) and refresh the task lines and that line's
             // record ID — not the whole message.
             if (event.data && event.data.mbxRecordSaved) {
-                if (mbxFullscreenFrame && mbxFullscreenFrame.contentWindow === event.source) mbxClearFullscreen();
+                if (mbxFullscreenFrame && mbxFullscreenFrame.contentWindow === event.source) {
+                    mbxClearFullscreen();
+                    mbxShowSavedNotice("Record saved");
+                }
                 refreshTaskCards();
                 return;
             }
