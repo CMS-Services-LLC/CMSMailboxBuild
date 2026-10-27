@@ -31,11 +31,12 @@ namespace CMSMailbox.Controllers
     //      message they received or sent, their company tree reaches the examined
     //      company (AccessTreeDown, same rule as exam snapshots), and the exam is still
     //      shared with that company;
-    //   2. is on the allowlist for the caller's role (no heatmap report, PDF, zip,
-    //      snapshots or CMS-file attach for either; scoring writes for the Assigner only);
+    //   2. is on the allowlist for the caller's role (no heatmap report, PDF, zip or
+    //      snapshots for either; scoring writes for the Assigner only);
     //   3. is pinned to the task: any examid must be the task's, any xcid becomes the
     //      examined company; answer edits/archives must be the task exam's answers written
     //      by the caller's company; deletes must be the caller's own upload on that exam;
+    //      CMS-file attaches are the caller's own cached files for the examined company;
     //   4. writes stop when CanWrite = 0 (Assignee: Completed; Assigner: Cancelled).
     // The assignee's first answer or upload moves the task Open → Pending Review
     // (MBX_MarkExamTaskStarted).
@@ -52,13 +53,18 @@ namespace CMSMailbox.Controllers
             // caller itself (1518 network + AccessTreeDown / own company) and is pinned to the
             // task's examid/xcid below. _MgtGetWorkflowStatus can create + back-fill the
             // workflow on first open, the same as opening the exam in CMSNEO.
-            "_MgtGetWorkflowStatus", "_MgtGetWorkflow", "_MgtGetWorkflowRecentRemoval", "_MgtGetWorkflowRecipients"
+            "_MgtGetWorkflowStatus", "_MgtGetWorkflow", "_MgtGetWorkflowRecentRemoval", "_MgtGetWorkflowRecipients",
+            // Document request "+" > From CMS: the caller's own CMS files for the examined
+            // company. Only while the task can still change, and the file cache is rebuilt
+            // first (see ExamAdHoc).
+            "_MGTGetCMSFiles"
         };
 
         // Content writes: require CanWrite; the assignee's mark the task started.
         private static readonly HashSet<string> ExamWriteActions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "_MgtUpdateAnswers", "_MgtUpdateAnswer", "_MgtArchiveAnswer", "_MgtDeleteFormDoc"
+            "_MgtUpdateAnswers", "_MgtUpdateAnswer", "_MgtArchiveAnswer", "_MgtDeleteFormDoc",
+            "_MGTExamAttachCMSDoc"
         };
 
         // Management view only (scoring): the Assigner role.
@@ -169,13 +175,27 @@ namespace CMSMailbox.Controllers
                 return Content("[]");
             }
 
+            if (string.Equals(action, "_MGTGetCMSFiles", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!ctx.CanWrite)
+                {
+                    LogAccess(messageItemId, uid, "Denied", "exam: task is " + ctx.TaskStatus + ", no CMS file picker");
+                    return Content("[]");
+                }
+                // NEO_MGTGetCMSFiles reads the caller's CMS file cache, which CMSNEO only
+                // rebuilds when they open Documents there, so a mailbox user's may be empty
+                // or old. Rebuild it the same way Documents does.
+                DB.GetDB("exec NEO_GetFiles8 @uid, 1", uid);
+            }
+
             string strParams = "";
             foreach (var key in jo) strParams += ", @" + key.Key;
             var dat = DB.GetDB("exec NEO" + action + " @uid" + strParams, uid, jo.ToString(Formatting.None));
 
             if (isWrite && !ctx.IsAssigner && !dat.Columns.Contains("err") &&
                 (string.Equals(action, "_MgtUpdateAnswers", StringComparison.OrdinalIgnoreCase) ||
-                 string.Equals(action, "_MgtUpdateAnswer", StringComparison.OrdinalIgnoreCase)))
+                 string.Equals(action, "_MgtUpdateAnswer", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(action, "_MGTExamAttachCMSDoc", StringComparison.OrdinalIgnoreCase)))
             {
                 MarkExamStarted(ctx.OriginItemID, uid);
             }
@@ -209,13 +229,8 @@ namespace CMSMailbox.Controllers
             if (why == null)
             {
                 jo["xuid"] = 0;
-                string lineid = jo["lineid"]?.ToString() ?? "", docreqid = jo["docreqid"]?.ToString() ?? "";
-                var dr = DB.GetDB(
-                    "select top 1 1 as x from a_aMGTExamDocRequest r " +
-                    "join a_aMgtExamBody b on b.LineID = r.LineID and b.ExamID = @examid and b.Active = 1 " +
-                    "where r.LineID = @lineid and r.DocReqID = @docreqid and r.Active = 1", uid,
-                    new JObject { ["examid"] = ctx.ExamID, ["lineid"] = lineid, ["docreqid"] = docreqid }.ToString());
-                if (dr.Rows.Count == 0 || dr.Columns.Contains("err")) why = "document request is not on this exam";
+                if (!IsDocRequestOnExam(jo["lineid"]?.ToString() ?? "", jo["docreqid"]?.ToString() ?? "", ctx, uid))
+                    why = "document request is not on this exam";
             }
             if (why != null)
             {
@@ -335,6 +350,33 @@ namespace CMSMailbox.Controllers
                 return ok.Rows.Count > 0 && !ok.Columns.Contains("err") ? null : "document is not your upload on this exam";
             }
 
+            if (string.Equals(action, "_MGTExamAttachCMSDoc", StringComparison.OrdinalIgnoreCase))
+            {
+                // Attached as the caller themself (the proc would otherwise act as any xuid),
+                // into a document request on this exam, and only files the picker offered:
+                // the caller's own cached CMS files for the examined company.
+                // Values are set in place: the exec binds parameters by position (key order).
+                JProperty Prop(string name) => jo.Properties().FirstOrDefault(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
+                if (Prop("xuid") == null || Prop("FIDS") == null) return "missing xuid or FIDS";
+                Prop("xuid").Value = 0;
+                if (!IsDocRequestOnExam(Val("lineid"), Val("docreqid"), ctx, uid)) return "document request is not on this exam";
+
+                var fids = Val("FIDS").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Select(s => int.TryParse(s, out var n) ? n : -1).Distinct().ToList();
+                // Dynamic Report files have negative FIDs; the mailbox can't open those (exam-viewer.html).
+                if (fids.Count == 0 || fids.Any(n => n <= 0)) return "no files selected, or a Dynamic Report file (not supported here)";
+
+                var ok = DB.GetDB(
+                    "select count(distinct f.FID) as n from NEO_MYFilesMar2026 f " +
+                    "join (select try_cast(value as int) FID from string_split(@fids, ',')) x on x.FID = f.FID " +
+                    "where f.CacheUID = @uid and f.FileCID = @xcid and f.FdrID > 0 and f.Folder <> '_archive'",
+                    uid, new JObject { ["fids"] = string.Join(",", fids), ["xcid"] = ctx.ExamCID }.ToString());
+                bool all = ok.Rows.Count > 0 && !ok.Columns.Contains("err") && Convert.ToInt32(ok.Rows[0]["n"]) == fids.Count;
+                if (!all) return "a selected file is not one of your CMS files for the examined company";
+                Prop("FIDS").Value = string.Join(",", fids);
+                return null;
+            }
+
             if (string.Equals(action, "_MgtWorkflowRemoveAction", StringComparison.OrdinalIgnoreCase))
             {
                 var ok = DB.GetDB(
@@ -346,6 +388,16 @@ namespace CMSMailbox.Controllers
             }
 
             return null;
+        }
+
+        private static bool IsDocRequestOnExam(string lineid, string docreqid, ExamTaskContext ctx, int uid)
+        {
+            var dr = DB.GetDB(
+                "select top 1 1 as x from a_aMGTExamDocRequest r " +
+                "join a_aMgtExamBody b on b.LineID = r.LineID and b.ExamID = @examid and b.Active = 1 " +
+                "where r.LineID = @lineid and r.DocReqID = @docreqid and r.Active = 1", uid,
+                new JObject { ["examid"] = ctx.ExamID, ["lineid"] = lineid, ["docreqid"] = docreqid }.ToString());
+            return dr.Rows.Count > 0 && !dr.Columns.Contains("err");
         }
 
         // ---- Exam Workflow report (PDF) -------------------------------------------------

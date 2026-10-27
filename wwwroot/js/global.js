@@ -7,7 +7,7 @@
 var UserToken = "";
 var jsOFiles = [];
 var jsSECURITY = [];
-var clogs = [];
+var clogs = [], CLOGS_MAX = 500, clogsCount = 0; //c_log keeps only the newest CLOGS_MAX entries
 var jssGA = false, jssUA = false, jssMGT = false, jssMyCID = 0, jssMyUID = 0, jssMyName = "", jssMyCompany = ""
 var showingNotificationsList = false;
 var notificationsList = [];
@@ -3743,9 +3743,12 @@ function uploadWelcome(GO) {
 // ============================================================
 // SECTION: debug logging, DOCX comment loading/adding, client-side cache (deleteCache/resetCache/CompareCache/compareJS)
 // ============================================================
+//only the newest CLOGS_MAX entries are kept: the full history held every logged object
+//(whole exams, folder lists) in memory until the page was reloaded
 function c_log() {
-    var ix = clogs.length;
+    var ix = clogsCount++;
     clogs.push({ ix: ix, log: arguments });
+    if (clogs.length > CLOGS_MAX) clogs.splice(0, clogs.length - CLOGS_MAX);
 
     //if (arguments[0] == "signers") { console.log(myUID, arguments[1]); }
     //console.log(arguments[1]);

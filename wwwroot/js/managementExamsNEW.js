@@ -34,6 +34,31 @@ let isReferenceSourceActive = false;
 //code:jk-20240904:109pm - added hasFocused for initial set focus
 var hasFocused = false;
 
+//code:20261027 the exam stays hidden behind "Please wait while the exam is loading ..." until the build and its
+//async fills (answers, scores, last-view layers) have all finished. Each load gets an id so a slow callback from a
+//previously selected exam can't reveal the current one; a 60s fallback reveals anyway if a call never comes back.
+var mgtExamLoadID = 0;
+function mgtExamLoadBegin(steps) {
+    var id = ++mgtExamLoadID;
+    ["ExamOpts", "availExamsInner"].forEach(function (d) {
+        var el = document.getElementById(d);
+        if (el) el.style.display = "none";
+    });
+    var done = function () {
+        if (id != mgtExamLoadID || --steps > 0) return;
+        mgtExamLoadID++;
+        var msg = document.getElementById("examLoadingMsg");
+        if (msg) msg.remove();
+        ["ExamOpts", "availExamsInner"].forEach(function (d) {
+            var el = document.getElementById(d);
+            if (el) el.style.display = "";
+        });
+        FocusLastQuestion();    //needs the exam visible to focus/scroll
+    };
+    setTimeout(function () { steps = 1; done(); }, 60000);
+    return done;
+}
+
 // ============================================================
 // SECTION: numeric helper, document-request/scoring visibility toggles, CMS-file lookup, main exam
 // viewer load (viewMgtExam is the big entry point building the whole exam UI)
@@ -334,6 +359,10 @@ function viewMgtExam(ExamID, xcid, xcompany, snapshot) {
     main = document.getElementById("availExamsInner");
     if (MgtSnapshot) { main.classList.add("mgtSnapRO"); }
 
+    //code:20261027 hide the exam until it is fully built: main build + answers + scores + last view
+    main.parentNode.insertBefore(dyn("div", "id=examLoadingMsg|style=padding:20px; font-weight:normal; color:black|innerHTML=Please wait while the exam is loading ..."), main);
+    var examLoaded = mgtExamLoadBegin(4);
+
     var btns = [
         "_MgtGetExam",
         "_MgtGetExamScoring",
@@ -472,18 +501,7 @@ function viewMgtExam(ExamID, xcid, xcompany, snapshot) {
                 }
             }
 
-            // Populate the dropdown options
-            var dropdown = document.getElementById("examSectionDropdown");
-            if (dropdown && uniqueModules.length > 0) {
-                // 1. Clear out any previously appended options first
-                dropdown.innerHTML = "";
-
-                uniqueModules.forEach(function (mod) {
-                    xsection(examSectionDropdown, [
-                        "option|value=" + mod.targetId + "|" + mod.name,
-                    ]);
-                });
-            }
+            //section dropdown options are written once after the loop (was cleared and rebuilt for every question)
 
             nsection("tblMain", ["tr|id=question-" + i + "|onmouseover=showQuestionModuleLabel('" + actual_Assessment_Module + "'); // Corrected: Use arrow function|tabindex=0|class=question question_" + strLineID + "|||" + //code 02032025 16:30
                 "td|style=padding-left:30px;background-color:" + bgclr + "|" + jsMgtExam[i]["QuestNum"] + " " + jsMgtExam[i]["Question"].replace(/=/g, "~"),
@@ -790,6 +808,19 @@ function viewMgtExam(ExamID, xcid, xcompany, snapshot) {
                 }
             }
         }
+        // Populate the dropdown options
+        var dropdown = document.getElementById("examSectionDropdown");
+        if (dropdown && uniqueModules.length > 0) {
+            // 1. Clear out any previously appended options first
+            dropdown.innerHTML = "";
+
+            uniqueModules.forEach(function (mod) {
+                xsection(examSectionDropdown, [
+                    "option|value=" + mod.targetId + "|" + mod.name,
+                ]);
+            });
+        }
+
         //c_log(ExamID, xcid);
         //code: 20240819: 0400pm Fetch data from the _MGTGetLastView SP
         getData(null, newFormData("_MGTGetLastView", { examid: ExamID, xcid: xcid }), function (vr) {
@@ -811,12 +842,14 @@ function viewMgtExam(ExamID, xcid, xcompany, snapshot) {
             if (recommendedRemediation && recommendedRemediation.OnOff === true) { MGTSetLayer(2, ExamID, xcid) };
             if (referenceSource && referenceSource.OnOff === true) { MGTSetLayer(3, ExamID, xcid) };
 
+            examLoaded();
         });
 
-        MGTPopAnswers();
+        MGTPopAnswers(null, null, examLoaded);
         MGTPopDocs();
-        MGTPopScores();
+        MGTPopScores(examLoaded);
 
+        examLoaded();
     });
     //2025 code: 16012025 3:00pm
     setTimeout(() => {
@@ -1695,7 +1728,7 @@ function MGTSetDefaultScores(go, lineid) {
 }
 
 
-function MGTPopScores() {
+function MGTPopScores(onDone) {
     var sc = mgtSnapMap(["_MgtGetExamScores"], [{ examid: MgtExamID, xcid: MgtXCID }]);
     getData(null, newFormData(sc[0][0], sc[1][0]), function (vr) {
         var js = jparse(vr);
@@ -1737,6 +1770,7 @@ function MGTPopScores() {
                 }
             }
         }
+        if (onDone) onDone();
     });
 }
 
@@ -1796,7 +1830,7 @@ function MGTEditAnswer(ea, ix, id, go, strLineID_IX) {
     }
 }
 
-function MGTPopAnswers(passedLineID, passedQNum) {
+function MGTPopAnswers(passedLineID, passedQNum, onDone) {
     var passedfld, passedfldDetails;
     //passedLineID = null;
     ////c_log("xxxmpa", passedLineID, passedQNum);
@@ -1825,6 +1859,14 @@ function MGTPopAnswers(passedLineID, passedQNum) {
 
         ////code:jk-20240904:109pm - replaced with function below, "FocusLastQuestion()"
         //focusLastAnsweredQuestion(jsMgtAnswers, passedQNum);//code: 20240819: 0400pm Invoke the focusLastAnsweredQuestion() Function
+
+        //mgt answer rows grouped by LineID once (was a js[1].filter for every answer x layer)
+        var mgtRowsByLine = new Map(), mgtRows = js[1] || [];
+        for (var r = 0; r < mgtRows.length; r++) {
+            var rLine = mgtRows[r].LineID;
+            if (!mgtRowsByLine.has(rLine)) mgtRowsByLine.set(rLine, []);
+            mgtRowsByLine.get(rLine).push(mgtRows[r]);
+        }
 
         //loop through both member and mgt answers
 
@@ -1896,8 +1938,7 @@ function MGTPopAnswers(passedLineID, passedQNum) {
 
                                 //////c_log("wtf", thisLineID, js[1]);
                                 try {
-                                    ans2 = js[1].filter(d =>
-                                        d.LineID == thisLineID &&
+                                    ans2 = (mgtRowsByLine.get(thisLineID) || []).filter(d =>
                                         d[MGTAuditLayers[ii]["Name"]] != null &&
                                         d[MGTAuditLayers[ii]["Name"]] != ""
                                     )[0][MGTAuditLayers[ii]["Name"]];
@@ -1970,7 +2011,9 @@ function MGTPopAnswers(passedLineID, passedQNum) {
         }
 
         //code:jk-20240904:109pm - function to set init focus
-        FocusLastQuestion();
+        //code:20261027 on the initial exam load the reveal step does the focus once the exam is visible
+        if (onDone) onDone();
+        else FocusLastQuestion();
     });
 }
 
