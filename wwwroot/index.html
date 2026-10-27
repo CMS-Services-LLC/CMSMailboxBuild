@@ -1028,9 +1028,9 @@
         function renderMessage(msg, items) {
             var pane = document.getElementById("messagePane");
             // Server-supplied: a recipient gets Archive + Reply; someone who only
-            // AUTHORED the message (the Sent folder) gets a read-only view — archiving
-            // is a per-recipient flag they don't have, and every item-access check
-            // (IaViewerController/ItemController) requires being a recipient.
+            // AUTHORED the message (the Sent folder) gets the sender's view — archiving
+            // is a per-recipient flag they don't have. Since sql/033 the item-access
+            // checks also let the sender open saved form records (senderCardHtml()).
             var isRecipient = !!msg.IsRecipient;
             currentArchived = !!msg.IsArchived;
             // A colleague the assignee shared a task with (sql/028): they get the recipient's
@@ -1155,13 +1155,16 @@
         // Mark as Completed button.
         function senderCardHtml(item) {
             var isExam = item.ItemType === "ExamTask" || item.ItemType === "ExamRef";
+            // A saved form record opens for its sender too (sql/033); the viewer still
+            // checks the sender's own CMS access to the form and record.
+            var isSavedForm = item.ItemType === "IAFormRecord" && item.ItemID && String(item.ItemID) !== "0";
             var html = taskBanner(item) + originBannerHtml(item) +
-                (isExam ? examFrameHtml(item, true) : "<strong>" + escapeHtml(item.ItemLabel || item.ItemType) + "</strong>");
+                (isExam ? examFrameHtml(item, true) : isSavedForm ? formLineHtml(item) : "<strong>" + escapeHtml(item.ItemLabel || item.ItemType) + "</strong>");
             if (item.IsAssigner && item.TaskStatus === "Pending Review") {
                 html += "<p class='hint'>The assignee has finished this task. Check it in CMSNEO, then mark it completed.</p>" +
                     "<button class='primary' id='reviewBtn_" + item.MessageItemID + "' onclick='reviewTask(" + item.MessageItemID + ")'>Mark as Completed</button>" +
                     "<div class='err' id='reviewMsg_" + item.MessageItemID + "'></div>";
-            } else if (!isOpenableReport(item) && item.ItemType !== "ExamTask" && item.ItemType !== "ExamRef") {
+            } else if (!isOpenableReport(item) && !isExam && !isSavedForm) {
                 html += "<p class='hint'>Attached to this message. Open it from the message you received, or in CMSNEO.</p>";
             }
             if (isOpenableReport(item)) html += drViewerHtml(item.MessageItemID);
