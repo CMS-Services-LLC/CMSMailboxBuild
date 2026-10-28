@@ -83,6 +83,8 @@ namespace CMSMailbox.Controllers
         }
 
         // Link-only email to each recipient of a message the caller just sent (new or reply).
+        // A recipient who still has to set up (never signed in, or reset by User Admin > Reset >
+        // Secure Email Setup) gets the activation email instead, as with CMS's Share/Assign.
         // Best-effort: a failed email never fails the send.
         public static void NotifyRecipients(int uid, int messageId)
         {
@@ -95,10 +97,50 @@ namespace CMSMailbox.Controllers
                 {
                     string email = r["Email"]?.ToString();
                     if (string.IsNullOrEmpty(email)) continue;
+                    if (SendActivationEmailIfNeeded(uid, Convert.ToInt32(r["UID"]), messageId, email)) continue;
                     Mail.SendNewMessageNotification(email, r["SenderName"]?.ToString(), r["SenderCompany"]?.ToString(), messageId);
                 }
                 catch { }
             }
+        }
+
+        // Port of CMS MailboxShareController.SendActivationEmailIfNeeded (sql/016, 017). A random 256-bit
+        // token goes only into the email; the database keeps its SHA-256. MBX_CreateActivation decides
+        // whether this recipient still needs to set up and stores the link only then.
+        // Returns true when the activation email was sent.
+        private static bool SendActivationEmailIfNeeded(int fromUid, int toUid, int messageId, string email)
+        {
+            byte[] raw = System.Security.Cryptography.RandomNumberGenerator.GetBytes(32);
+            string token = Convert.ToHexString(raw).ToLowerInvariant();
+            string tokenHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.ASCII.GetBytes(token)));
+
+            var dat = DB.GetDB("exec MBX_CreateActivation @uid, @xuid, @messageId, @tokenHash", fromUid,
+                new JObject { ["xuid"] = toUid, ["messageId"] = messageId, ["tokenHash"] = tokenHash }.ToString());
+            // A skip is logged by the proc itself (a_Suite_Actions 'ActivationSkipped'); a failed call is logged here.
+            if (dat.Rows.Count == 0 || dat.Columns.Contains("err"))
+            {
+                string err = dat.Columns.Contains("err") ? dat.Rows[0]["err"].ToString() : "no rows";
+                DB.GetDB("exec insertAction @uid, @title, @sp, @params, @results", fromUid, new JObject
+                {
+                    ["title"] = "ActivationError",
+                    ["sp"] = "MBX_CreateActivation",
+                    ["params"] = "xuid=" + toUid + ",messageId=" + messageId,
+                    ["results"] = err.Length > 4000 ? err.Substring(0, 4000) : err
+                }.ToString());
+                return false;
+            }
+            if (dat.Rows[0]["NeedsActivation"]?.ToString() != "True") return false;
+
+            string firstName = dat.Rows[0]["FirstName"]?.ToString();
+            if (string.IsNullOrWhiteSpace(firstName)) firstName = "there";
+
+            // The token rides in the fragment (#), which browsers never send to a server or in a Referer.
+            string link = DB.Url.TrimEnd('/') + "/activate.html#t=" + token;
+            if (Mail.SendActivation(email, firstName, link)) return true;
+
+            // Send failed: retire the unsent link (logged as 'ActivationEmailFailed'); the caller sends the plain notification.
+            DB.GetDB("exec MBX_ActivationEmailFailed @uid, @tokenHash", fromUid, new JObject { ["tokenHash"] = tokenHash }.ToString());
+            return false;
         }
 
         [HttpPost("inbox/{messageId:int}/attachments")]

@@ -64,6 +64,62 @@ namespace CMSMailbox
             }
         }
 
+        private const int ActivationHours = 48;   // must match MBX_CreateActivation's dateadd(hour, 48, ...)
+        private const string SupportEmailAddr = "info@cms-services.net";
+        private const string SupportUrl = "https://www.cms-services.net";
+        private const string CompanyName = "CMS Services";
+
+        // The first-time setup email for a message sent from the mailbox itself. Same wording as CMS's
+        // (MailboxShareController.SendActivationEmailIfNeeded); keep the two in step. False if it didn't send.
+        public static bool SendActivation(string email, string firstName, string link)
+        {
+            string body =
+                "<p>Hello " + System.Net.WebUtility.HtmlEncode(firstName) + ",</p>" +
+                "<p>Welcome to CMS Secure Email.</p>" +
+                "<p>An account has been created for you. To get started, you must set your password and enable two-factor authentication (2FA). This only takes a couple of minutes.</p>" +
+                "<p><b>Activate your account:</b><br><a href=\"" + link + "\">" + link + "</a></p>" +
+                "<p>This link is unique to you and will expire in " + ActivationHours + " hours. It can only be used once.</p>" +
+                "<p><b>What to expect:</b></p>" +
+                "<ol>" +
+                "<li>Click the link above.</li>" +
+                "<li>Create a strong password.</li>" +
+                "<li>Scan the QR code with an authenticator app (such as Google Authenticator, Microsoft Authenticator, Authy, or 1Password) and enter the 6-digit code to confirm.</li>" +
+                "<li>Save your backup codes in a safe place (you will see them after setup).</li>" +
+                "</ol>" +
+                "<p><b>Important security notes:</b></p>" +
+                "<ul>" +
+                "<li>Never share your password or authenticator codes.</li>" +
+                "<li>The activation link is only valid for a limited time.</li>" +
+                "<li>If you did not expect this email, you can safely ignore it or contact support.</li>" +
+                "</ul>" +
+                "<p>If the link has expired or you need help, please contact <a href=\"mailto:" + SupportEmailAddr + "\">" + SupportEmailAddr + "</a> or visit <a href=\"" + SupportUrl + "\">" + SupportUrl + "</a>.</p>" +
+                "<p>Thank you,<br>The CMS Secure Email Team<br>" + CompanyName + "<br>" + SupportEmailAddr + "</p>" +
+                Footer;
+
+            try
+            {
+                var creds = Creds();
+                var message = new MimeMessage();
+                message.From.Add(new MailboxAddress(creds[0], creds[1]));
+                message.To.Add(new MailboxAddress("", email));
+                message.Subject = "Welcome to CMS Secure Email – Activate Your Account";
+                message.Body = new TextPart("html") { Text = body };
+
+                using (var client = new SmtpClient())
+                {
+                    client.Connect("smtp.office365.com", 587);
+                    client.Authenticate(creds[2], creds[3]);
+                    client.Send(message);
+                    client.Disconnect(true);
+                }
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         // A new secure message (or reply) sent from the mailbox itself (sql/029). Same wording as
         // CMS's notification (MailboxShareController.SendShareNotificationEmails): no content, only
         // a link, and the sender's name and company in the subject.
