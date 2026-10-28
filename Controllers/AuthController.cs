@@ -220,6 +220,11 @@ namespace CMSMailbox.Controllers
             return Ok(new { origin });
         }
 
+        // mercury.cms-services.net/Welcome (the old Mercury landing link) sends people to
+        // the mailbox login page. Temporary redirect, so the target can change later.
+        [HttpGet("/Welcome")]
+        public IActionResult Welcome() => Redirect("/");
+
         // Mirrors CMS's Validate action (HomeController.cs ~4445) for the new-IP
         // verification email link, against the same a_Suite_ValidateIP proc.
         [HttpGet("/Validate")]
