@@ -23,7 +23,7 @@ namespace CMSMailbox
 
         // Thin branded footer appended to every email this app sends.
         private const string Footer =
-            "<table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" width=\"100%\" style=\"max-width:600px; margin:20px auto 0; background-color:#ffffff; border-top:3px solid #015390;\">" +
+            "<table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" width=\"100%\" style=\"margin:20px 0 0; background-color:#ffffff; border-top:3px solid #015390;\">" +
               "<tr><td style=\"padding:10px 16px; text-align:center; background-color:#f8fafc;\">" +
                 "<table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" width=\"100%\"><tr>" +
                   "<td style=\"text-align:center; padding-bottom:6px;\">" +
@@ -37,6 +37,50 @@ namespace CMSMailbox
               "</td></tr>" +
             "</table>";
 
+        // Name and company of the user an email goes to, by UID, or by email when only that is known
+        // (the IP validation email). Empty strings when not found.
+        private static (string Name, string Company) Recipient(int uid, string email = "")
+        {
+            const string sql = "select top 1 u.Fname + ' ' + u.Lname as Name, c.Company " +
+                "from Users u left join Companies c on c.CID = dbo.mycid(u.UID) ";
+            var d = uid > 0
+                ? DB.GetDB(sql + "where u.UID = @uid", uid)
+                : DB.GetDB(sql + "where u.Email = @email and u.Active = 1 order by u.UID", 0,
+                    new Newtonsoft.Json.Linq.JObject { ["email"] = email ?? "" }.ToString());
+            if (d.Rows.Count == 0 || !d.Columns.Contains("Name")) return ("", "");
+            return (d.Rows[0]["Name"]?.ToString() ?? "", d.Rows[0]["Company"]?.ToString() ?? "");
+        }
+
+        // Every secure email starts with the CMS logo (embedded as cid:cmslogo, so it shows without
+        // "download pictures"), the recipient's name and company, and a do-not-reply line.
+        // Keep in step with CMS's csMail.SecureBody.
+        private static MimeEntity SecureBody(string html, (string Name, string Company) to)
+        {
+            var builder = new BodyBuilder();
+            string logo = "";
+            using (var s = typeof(Mail).Assembly.GetManifestResourceStream("EmailLogo.png"))
+            {
+                if (s != null)
+                {
+                    builder.LinkedResources.Add("cms_logo.png", s).ContentId = "cmslogo";
+                    logo = "<tr><td style=\"padding:0 0 10px;\"><img src=\"cid:cmslogo\" alt=\"CMS\" width=\"300\" height=\"59\" style=\"display:block; border:0;\"></td></tr>";
+                }
+            }
+            string name = System.Net.WebUtility.HtmlEncode((to.Name ?? "").Trim());
+            string company = System.Net.WebUtility.HtmlEncode((to.Company ?? "").Trim());
+            string toLine = name == "" && company == "" ? "" :
+                "<tr><td style=\"font-size:14px; color:#333333; padding:0 0 4px;\"><b>" + name + "</b>" +
+                (name != "" && company != "" ? "<br>" : "") + company + "</td></tr>";
+
+            builder.HtmlBody =
+                "<table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" width=\"100%\" style=\"margin:0 0 16px; border-bottom:3px solid #015390;\">" +
+                  logo + toLine +
+                  "<tr><td style=\"font-size:13px; color:#cc0000; font-weight:bold; padding:4px 0 10px;\">Do not reply to this email.</td></tr>" +
+                "</table>" +
+                html;
+            return builder.ToMessageBody();
+        }
+
         public static void SendIPAuth(string email, string auth)
         {
             var creds = Creds();
@@ -45,15 +89,14 @@ namespace CMSMailbox
             message.From.Add(new MailboxAddress(creds[0], creds[1]));
             message.To.Add(new MailboxAddress("", email));
             message.Subject = "CMS Secure Mailbox IP Validation";
-            message.Body = new TextPart("html")
-            {
-                Text = "<p>You have attempted to log in to the CMS Secure Mailbox from an unknown location.</p>" +
+            message.Body = SecureBody(
+                "<p>You have attempted to log in to the CMS Secure Mailbox from an unknown location.</p>" +
                 "<p>Please click the link below to validate this location and enter the site.</p>" +
                 @"<p><a href=""" + DB.Url + @"/Validate?auth=" + auth + @""">Validate my IP Address</a></p>" +
                 "<p style=\"color:red\">*** If you believe a login was attempted by someone other than yourself, please click the link below.</p>" +
                 @"<p><a href=""" + DB.Url + @"/Validate?deny=" + auth + @""">Deny Validation from this IP Address</a></p>" +
-                Footer
-            };
+                Footer,
+                Recipient(0, email));
 
             using (var client = new SmtpClient())
             {
@@ -71,7 +114,7 @@ namespace CMSMailbox
 
         // The first-time setup email for a message sent from the mailbox itself. Same wording as CMS's
         // (MailboxShareController.SendActivationEmailIfNeeded); keep the two in step. False if it didn't send.
-        public static bool SendActivation(string email, string firstName, string link)
+        public static bool SendActivation(string email, int toUid, string firstName, string link)
         {
             string body =
                 "<p>Hello " + System.Net.WebUtility.HtmlEncode(firstName) + ",</p>" +
@@ -103,7 +146,7 @@ namespace CMSMailbox
                 message.From.Add(new MailboxAddress(creds[0], creds[1]));
                 message.To.Add(new MailboxAddress("", email));
                 message.Subject = "Welcome to CMS Secure Email – Activate Your Account";
-                message.Body = new TextPart("html") { Text = body };
+                message.Body = SecureBody(body, Recipient(toUid));
 
                 using (var client = new SmtpClient())
                 {
@@ -123,7 +166,7 @@ namespace CMSMailbox
         // A new secure message (or reply) sent from the mailbox itself (sql/029). Same wording as
         // CMS's notification (MailboxShareController.SendShareNotificationEmails): no content, only
         // a link, and the sender's name and company in the subject.
-        public static void SendNewMessageNotification(string email, string senderName, string senderCompany, int messageId)
+        public static void SendNewMessageNotification(string email, int toUid, string senderName, string senderCompany, int messageId)
         {
             var creds = Creds();
             string from = string.IsNullOrEmpty(senderName) ? "" :
@@ -134,9 +177,8 @@ namespace CMSMailbox
             message.From.Add(new MailboxAddress(creds[0], creds[1]));
             message.To.Add(new MailboxAddress("", email));
             message.Subject = "You have a new secure message" + from;
-            message.Body = new TextPart("html")
-            {
-                Text = "<p>You have a new secure message waiting for you" +
+            message.Body = SecureBody(
+                    "<p>You have a new secure message waiting for you" +
                     (string.IsNullOrEmpty(senderName) ? "" : " from <b>" + System.Net.WebUtility.HtmlEncode(senderName) +
                         (string.IsNullOrEmpty(senderCompany) ? "" : " (" + System.Net.WebUtility.HtmlEncode(senderCompany) + ")") + "</b>") +
                     ".</p>" +
@@ -146,8 +188,8 @@ namespace CMSMailbox
                     "It does not contain any confidential information — sign in to CMS Secure Mailbox with your own " +
                     "credentials to view the message. If you were not expecting this message, please " +
                     "contact your system administrator.</p>" +
-                    Footer
-            };
+                    Footer,
+                Recipient(toUid));
 
             using (var client = new SmtpClient())
             {

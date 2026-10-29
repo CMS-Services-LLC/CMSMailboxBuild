@@ -22,6 +22,8 @@
     <Content Update="appsettings.json">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
+    <!-- the logo at the top of every secure email (Mail.SecureBody) -->
+    <EmbeddedResource Include="wwwroot\images\logo_1704.png" LogicalName="EmailLogo.png" />
   </ItemGroup>
 
 </Project>

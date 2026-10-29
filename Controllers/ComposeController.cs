@@ -98,7 +98,7 @@ namespace CMSMailbox.Controllers
                     string email = r["Email"]?.ToString();
                     if (string.IsNullOrEmpty(email)) continue;
                     if (SendActivationEmailIfNeeded(uid, Convert.ToInt32(r["UID"]), messageId, email)) continue;
-                    Mail.SendNewMessageNotification(email, r["SenderName"]?.ToString(), r["SenderCompany"]?.ToString(), messageId);
+                    Mail.SendNewMessageNotification(email, Convert.ToInt32(r["UID"]), r["SenderName"]?.ToString(), r["SenderCompany"]?.ToString(), messageId);
                 }
                 catch { }
             }
@@ -136,7 +136,7 @@ namespace CMSMailbox.Controllers
 
             // The token rides in the fragment (#), which browsers never send to a server or in a Referer.
             string link = DB.Url.TrimEnd('/') + "/activate.html#t=" + token;
-            if (Mail.SendActivation(email, firstName, link)) return true;
+            if (Mail.SendActivation(email, toUid, firstName, link)) return true;
 
             // Send failed: retire the unsent link (logged as 'ActivationEmailFailed'); the caller sends the plain notification.
             DB.GetDB("exec MBX_ActivationEmailFailed @uid, @tokenHash", fromUid, new JObject { ["tokenHash"] = tokenHash }.ToString());
