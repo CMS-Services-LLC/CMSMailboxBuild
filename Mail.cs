@@ -51,10 +51,18 @@ namespace CMSMailbox
             return (d.Rows[0]["Name"]?.ToString() ?? "", d.Rows[0]["Company"]?.ToString() ?? "");
         }
 
-        // Every secure email starts with the CMS logo (embedded as cid:cmslogo, so it shows without
-        // "download pictures"), the recipient's name and company, and a do-not-reply line.
+        // The small grey automated-notification note on the new-message email.
+        private const string NotificationDisclaimer =
+            "This is an automated notification from CMS Secure Mailbox. " +
+            "It does not contain any confidential information — sign in to CMS Secure Mailbox with your own " +
+            "credentials to view the message. If you were not expecting this message, please " +
+            "contact your system administrator.";
+
+        // Every secure email, top to bottom (John, 2026-10-29): the message itself, "Do not reply to
+        // this email.", "To: Name (Company)", the CMS logo (embedded as cid:cmslogo, so it shows without
+        // "download pictures"), the small disclaimer (if any), then Footer.
         // Keep in step with CMS's csMail.SecureBody.
-        private static MimeEntity SecureBody(string html, (string Name, string Company) to)
+        private static MimeEntity SecureBody(string html, (string Name, string Company) to, string disclaimer = "")
         {
             var builder = new BodyBuilder();
             string logo = "";
@@ -63,21 +71,22 @@ namespace CMSMailbox
                 if (s != null)
                 {
                     builder.LinkedResources.Add("cms_logo.png", s).ContentId = "cmslogo";
-                    logo = "<tr><td style=\"padding:0 0 10px;\"><img src=\"cid:cmslogo\" alt=\"CMS\" width=\"300\" height=\"59\" style=\"display:block; border:0;\"></td></tr>";
+                    logo = "<p style=\"margin:16px 0;\"><img src=\"cid:cmslogo\" alt=\"CMS\" width=\"300\" height=\"59\" style=\"display:block; border:0;\"></p>";
                 }
             }
             string name = System.Net.WebUtility.HtmlEncode((to.Name ?? "").Trim());
             string company = System.Net.WebUtility.HtmlEncode((to.Company ?? "").Trim());
             string toLine = name == "" && company == "" ? "" :
-                "<tr><td style=\"font-size:14px; color:#333333; padding:0 0 4px;\"><b>" + name + "</b>" +
-                (name != "" && company != "" ? "<br>" : "") + company + "</td></tr>";
+                "<p style=\"font-size:14px; color:#333333;\">To: <b>" + name + "</b>" +
+                (company == "" ? "" : (name == "" ? "" : " ") + "(" + company + ")") + "</p>";
 
             builder.HtmlBody =
-                "<table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" width=\"100%\" style=\"margin:0 0 16px; border-bottom:3px solid #015390;\">" +
-                  logo + toLine +
-                  "<tr><td style=\"font-size:13px; color:#cc0000; font-weight:bold; padding:4px 0 10px;\">Do not reply to this email.</td></tr>" +
-                "</table>" +
-                html;
+                html +
+                "<p style=\"font-size:13px; color:#cc0000; font-weight:bold;\">Do not reply to this email.</p>" +
+                toLine +
+                logo +
+                (disclaimer == "" ? "" : "<p style=\"font-size:11px; color:#777777;\">" + disclaimer + "</p>") +
+                Footer;
             return builder.ToMessageBody();
         }
 
@@ -94,8 +103,7 @@ namespace CMSMailbox
                 "<p>Please click the link below to validate this location and enter the site.</p>" +
                 @"<p><a href=""" + DB.Url + @"/Validate?auth=" + auth + @""">Validate my IP Address</a></p>" +
                 "<p style=\"color:red\">*** If you believe a login was attempted by someone other than yourself, please click the link below.</p>" +
-                @"<p><a href=""" + DB.Url + @"/Validate?deny=" + auth + @""">Deny Validation from this IP Address</a></p>" +
-                Footer,
+                @"<p><a href=""" + DB.Url + @"/Validate?deny=" + auth + @""">Deny Validation from this IP Address</a></p>",
                 Recipient(0, email));
 
             using (var client = new SmtpClient())
@@ -136,8 +144,7 @@ namespace CMSMailbox
                 "<li>If you did not expect this email, you can safely ignore it or contact support.</li>" +
                 "</ul>" +
                 "<p>If the link has expired or you need help, please contact <a href=\"mailto:" + SupportEmailAddr + "\">" + SupportEmailAddr + "</a> or visit <a href=\"" + SupportUrl + "\">" + SupportUrl + "</a>.</p>" +
-                "<p>Thank you,<br>The CMS Secure Email Team<br>" + CompanyName + "<br>" + SupportEmailAddr + "</p>" +
-                Footer;
+                "<p>Thank you,<br>The CMS Secure Email Team<br>" + CompanyName + "<br>" + SupportEmailAddr + "</p>";
 
             try
             {
@@ -182,14 +189,8 @@ namespace CMSMailbox
                     (string.IsNullOrEmpty(senderName) ? "" : " from <b>" + System.Net.WebUtility.HtmlEncode(senderName) +
                         (string.IsNullOrEmpty(senderCompany) ? "" : " (" + System.Net.WebUtility.HtmlEncode(senderCompany) + ")") + "</b>") +
                     ".</p>" +
-                    "<p><a href=\"" + link + "\">Open it in the CMS Secure Mailbox</a></p>" +
-                    "<hr style=\"border:none;border-top:1px solid #ccc;margin:20px 0\">" +
-                    "<p style=\"font-size:11px;color:#777\">This is an automated notification from CMS Secure Mailbox. " +
-                    "It does not contain any confidential information — sign in to CMS Secure Mailbox with your own " +
-                    "credentials to view the message. If you were not expecting this message, please " +
-                    "contact your system administrator.</p>" +
-                    Footer,
-                Recipient(toUid));
+                    "<p><a href=\"" + link + "\">Open it in the CMS Secure Mailbox</a></p>",
+                Recipient(toUid), NotificationDisclaimer);
 
             using (var client = new SmtpClient())
             {
