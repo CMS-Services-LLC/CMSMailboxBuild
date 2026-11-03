@@ -282,6 +282,9 @@
       UserToken = realToken;
       MgtWorkflowPdfUrl = "exam/" + messageItemId + "/workflow/pdf";
       MgtWorkflowSendUrl = "exam/" + messageItemId + "/workflow/send";
+      // Management-only exam documents (CMS FEATURE_ExamPrivateDocs) are CMS-only: no box here,
+      // and ExamDoc never serves one.
+      MgtPrivateDocsEnabled = false;
 
       fetch("exam/" + messageItemId + "/bootstrap", { headers: { "Authorization": "Bearer " + realToken } })
         .then(function (r) { if (!r.ok) throw new Error("bootstrap failed"); return r.json(); })

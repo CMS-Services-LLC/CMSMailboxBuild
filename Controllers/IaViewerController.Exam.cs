@@ -272,7 +272,9 @@ namespace CMSMailbox.Controllers
                 "case when d.LinkedFID is not null then fd.FileData else d.Filedata end as FileData " +
                 "from a_aMGTExamDocs d left join files f on f.fid = d.LinkedFID " +
                 "left join FileData fd on fd.fid = f.fid and fd.isDispute = 0 " +
-                "where d.FID = @fid and d.ExamID = @examid and d.xCID = @xcid and d.Active = 1", uid,
+                "where d.FID = @fid and d.ExamID = @examid and d.xCID = @xcid and d.Active = 1 " +
+                // management-only documents (CMS sql FEATURE_ExamPrivateDocs pmd_001) are never served here
+                "and d.IsPrivate = 0", uid,
                 new JObject { ["fid"] = fid, ["examid"] = ctx.ExamID, ["xcid"] = ctx.ExamCID }.ToString());
             if (dat.Rows.Count == 0 || dat.Columns.Contains("err") || !(dat.Rows[0]["FileData"] is byte[] bytes))
             {
