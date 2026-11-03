@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
 namespace CMSMailbox.Controllers
@@ -47,7 +48,8 @@ namespace CMSMailbox.Controllers
             var candidates = DB.GetDB("exec MBX_GetTaskShareCandidates @uid, @taskId, @side", uid, p);
             if (candidates.Columns.Contains("err")) return NotFound();
 
-            return Ok(new { shares = JArray.FromObject(shares), candidates = JArray.FromObject(candidates) });
+            // Newtonsoft, not Ok(): this app's System.Text.Json writes every JValue as [] (no UIDs or names).
+            return Content(JsonConvert.SerializeObject(new { shares, candidates }), "application/json");
         }
 
         [HttpPost("task/{taskId:int}/share")]
