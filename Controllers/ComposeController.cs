@@ -204,7 +204,9 @@ namespace CMSMailbox.Controllers
             return Ok(new
             {
                 messages = JsonConvert.SerializeObject(ds.Tables[0]),
-                attachments = ds.Tables.Count > 1 ? JsonConvert.SerializeObject(ds.Tables[1]) : "[]"
+                attachments = ds.Tables.Count > 1 ? JsonConvert.SerializeObject(ds.Tables[1]) : "[]",
+                // sql/035: the tasks on the thread's messages (absent before 035 is run).
+                tasks = ds.Tables.Count > 2 ? JsonConvert.SerializeObject(ds.Tables[2]) : "[]"
             });
         }
 
