@@ -1411,16 +1411,40 @@ function MGTPopDocs() {
         }
     }
 
-    if (MgtDocsMgtView) { MGTPopPrivateDocs(); }
+    MGTPopPrivateDocs();
 }
 
-//code:20261103 "Management only" box under each question's document requests: private documents
-//(NEO_MgtGetExamDocs rows with IsPrivate = 1), never shown to the examined company
+//code:20261103 two boxes under each question's document requests, for documents under no document request:
+//  "Management only" (NEO_MgtGetExamDocs rows with IsPrivate = 1): management only, never the examined company
+//  "Shared by management" (IsPrivate = 0, DocReqID ''): management documents shared with the examined company,
+//  shown to everyone who can see the exam (CMSMailbox too), only when there are some; x / Make private for management
 function MGTPopPrivateDocs() {
+    var xcName = String(MgtXCompany || "the company").replace(/\|/g, "/");
     for (var l = 0; l < MGTLineIDs.length; l++) {
         var ln = MGTLineIDs[l];
         var sect = document.getElementById("answerDocs_" + ln.strLineID);
         if (sect == null) continue;
+
+        var shared = jsMgtDocs.filter(d => d.LineID == ln.LineID && d.IsPrivate == 0 && d.DocReqID == "" && d.Document_Request == null && d.FID != null);
+        if (shared.length > 0) {
+            xsection(sect, [
+                "div|class=docrequest shadowSection mgtSharedDocs|style=padding:5px; font-weight:bold|Management documents shared with " + xcName,
+                "div|id=docShared_" + ln.strLineID + "|class=mgtSharedDocs|style=padding:10px"
+            ]);
+            for (var i = 0; i < shared.length; i++) {
+                var dr = shared[i];
+                var onclick = "reportLoadFiles(" + dr.FID + ",'" + dr.Filename + "','Application')";
+                xsection(document.getElementById("docShared_" + ln.strLineID), [
+                    "div|id=docReq_" + dr.FID +
+                    ((MgtDocsMgtView) ? "|||label|class=redlink|onclick=delExamDoc(" + dr.FID + ",false," + dr.DocFID + ")|x|||label|style=width:10px" : "") +
+                    "|||label|icon=file-receiving.png|class=cursor|onclick=" + onclick + "|" + dr.Filename +
+                    ((MgtDocsMgtView) ? "|||label|class=cursor mgtDocPrivToggle|style=color:steelblue; padding-left:15px; font-weight:normal|onclick=MgtToggleDocPrivate(" + dr.DocFID + ",1)|Make private" : ""),
+                    "div|id=docReq2_" + dr.FID + "|style=font-weight:bold; padding:left:10px; padding:5px|Loaded By: " + dr.LoadedByName + " with " + dr.LoadedByCompany + " on " + convertDT(dr.DTCreated) + ", shared with " + xcName,
+                ]);
+            }
+        }
+
+        if (!MgtDocsMgtView) continue;
 
         xsection(sect, [
             "div|class=docrequest shadowSection mgtPrivateDocs|style=padding:5px; font-weight:bold; background-color:#fff8e1|&#128274; Management only (not visible to the examined company)" +
@@ -1444,27 +1468,12 @@ function MGTPopPrivateDocs() {
     }
 }
 
-//code:20261103 make a document private (makePrivate 1) or share it again (0). Sharing puts it under a document
-//request on its question: the one it came from / the only one (server), or the one picked here when there are several.
-function MgtToggleDocPrivate(DocFID, makePrivate, DocReqID) {
-    var doc = jsMgtDocs.find(d => d.DocFID == DocFID);
-    if (makePrivate == 0 && DocReqID == null && doc != null) {
-        var reqs = [];
-        jsMgtDocs.filter(d => d.LineID == doc.LineID && d.Document_Request != null && d.IsPrivate != 1).forEach(function (d) {
-            if (reqs.findIndex(r => r.DocReqID == d.DocReqID) == -1) reqs.push(d);
-        });
-        if (reqs.length > 1) {
-            var elems = ["div|class=hdr|style=background-color:whitesmoke|Share under which document request?", "hr"];
-            reqs.forEach(function (r) {
-                elems.push("button|class=longblueButton|style=width:300px; margin:5px|onclick=MgtToggleDocPrivate(" + DocFID + ",0,'" + r.DocReqID + "')|" + r.Document_Request);
-            });
-            xconfirm(null, elems, "cancel");
-            return;
-        }
-    }
-
+//code:20261103 make a document private (makePrivate 1) or share it with the examined company (0). Sharing never asks
+//for a document request: the server puts it back under the request it came from if there was one, otherwise it
+//shows in the question's "Management documents shared with <company>" box.
+function MgtToggleDocPrivate(DocFID, makePrivate) {
     xconfirm();
-    getData(null, newFormData("_MgtSetDocPrivate", { fid: DocFID, private: makePrivate, docreqid: DocReqID || "" }), function (vr) {
+    getData(null, newFormData("_MgtSetDocPrivate", { fid: DocFID, private: makePrivate }), function (vr) {
         var js = jparse(vr);
         if (js.length > 0 && js[0].Msg != null) {
             xconfirm(js[0].Msg);
