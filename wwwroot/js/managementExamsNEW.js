@@ -1437,7 +1437,7 @@ function MGTPopPrivateDocs() {
                 "|||label|class=redlink|onclick=delExamDoc(" + dr.FID + ",false," + dr.DocFID + ")|x" +
                 "|||label|style=width:10px" +
                 "|||label|icon=document-white.png|class=cursor|onclick=" + onclick + "|" + dr.Filename +
-                "|||label|class=cursor mgtDocPrivToggle|style=color:steelblue; padding-left:15px; font-weight:normal|onclick=MgtToggleDocPrivate(" + dr.DocFID + ",0)|Share with company",
+                "|||label|class=cursor mgtDocPrivToggle|style=color:steelblue; padding-left:15px; font-weight:normal|onclick=MgtToggleDocPrivate(" + dr.DocFID + ",0)|Share with " + String(MgtXCompany || "company").replace(/\|/g, "/"),
                 "div|id=docReq2_" + dr.FID + "|style=font-weight:bold; padding:left:10px; padding:5px|Loaded By: " + dr.LoadedByName + " with " + dr.LoadedByCompany + " on " + convertDT(dr.DTCreated),
             ]);
         }
