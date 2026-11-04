@@ -1486,15 +1486,17 @@ function mgtDocDescLink(dr) {
         ((dr.Description) ? "Edit description" : "Add description");
 }
 
-// the description under the Loaded By line; set as text, because xsection reads "=" and "|" in its strings as markup
+// the description, above the document's filename row (John 2026-11-04); set as text, because xsection reads "=" and "|" in its strings as markup
 function mgtDocDescShow(parent, dr) {
     if (parent == null || !dr.Description) return;
     var d = document.createElement("div");
     d.id = "docReq3_" + dr.FID; // removed with the row by delExamDoc
     d.className = "mgtDocDesc";
-    d.style.cssText = "padding:0 5px 8px 25px; white-space:pre-wrap; font-weight:normal; color:#333";
+    d.style.cssText = "padding:5px 5px 2px 5px; white-space:pre-wrap; font-weight:normal; color:#333";
     d.textContent = dr.Description;
-    parent.appendChild(d);
+    var row = document.getElementById("docReq_" + dr.FID);
+    if (row != null && row.parentElement == parent) parent.insertBefore(d, row);
+    else parent.appendChild(d);
 }
 
 var MgtDocDescQueue = [];
