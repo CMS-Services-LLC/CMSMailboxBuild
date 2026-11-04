@@ -1404,6 +1404,7 @@ function MGTPopDocs() {
                         ((MgtDocsMgtView) ? "|||label|class=cursor mgtDocPrivToggle|style=color:steelblue; padding-left:15px; font-weight:normal|onclick=MgtToggleDocPrivate(" + docFIDRow + ",1)|Make private" : ""),
                         "div|id=docReq2_" + dr.FID + "|style=font-weight:bold; padding:left:10px; padding:5px|Loaded By: " + dr.LoadedByName + " with " + dr.LoadedByCompany + " on " + convertDT(dr.DTCreated),
                     ]);
+                    mgtDocDescShow(subsect, dr); //code:20261104 a management document shared back under its request keeps its description
                 } catch (ex) {
                     ////c_log("docs", ex)
                 }
@@ -1439,8 +1440,10 @@ function MGTPopPrivateDocs() {
                     ((MgtDocsMgtView) ? "|||label|class=redlink|onclick=delExamDoc(" + dr.FID + ",false," + dr.DocFID + ")|x|||label|style=width:10px" : "") +
                     "|||label|icon=file-receiving.png|class=cursor|onclick=" + onclick + "|" + dr.Filename +
                     ((MgtDocsMgtView) ? "|||label|class=cursor mgtDocPrivToggle|style=color:steelblue; padding-left:15px; font-weight:normal|onclick=MgtToggleDocPrivate(" + dr.DocFID + ",1)|Make private" : ""),
-                    "div|id=docReq2_" + dr.FID + "|style=font-weight:bold; padding:left:10px; padding:5px|Loaded By: " + dr.LoadedByName + " with " + dr.LoadedByCompany + " on " + convertDT(dr.DTCreated) + ", shared with " + xcName,
+                    "div|id=docReq2_" + dr.FID + "|style=font-weight:bold; padding:left:10px; padding:5px|Loaded By: " + dr.LoadedByName + " with " + dr.LoadedByCompany + " on " + convertDT(dr.DTCreated) + ", shared with " + xcName +
+                    mgtDocDescLink(dr),
                 ]);
+                mgtDocDescShow(document.getElementById("docShared_" + ln.strLineID), dr);
             }
         }
 
@@ -1462,10 +1465,89 @@ function MGTPopPrivateDocs() {
                 "|||label|style=width:10px" +
                 "|||label|icon=document-white.png|class=cursor|onclick=" + onclick + "|" + dr.Filename +
                 "|||label|class=cursor mgtDocPrivToggle|style=color:steelblue; padding-left:15px; font-weight:normal|onclick=MgtToggleDocPrivate(" + dr.DocFID + ",0)|Share with " + String(MgtXCompany || "company").replace(/\|/g, "/"),
-                "div|id=docReq2_" + dr.FID + "|style=font-weight:bold; padding:left:10px; padding:5px|Loaded By: " + dr.LoadedByName + " with " + dr.LoadedByCompany + " on " + convertDT(dr.DTCreated),
+                "div|id=docReq2_" + dr.FID + "|style=font-weight:bold; padding:left:10px; padding:5px|Loaded By: " + dr.LoadedByName + " with " + dr.LoadedByCompany + " on " + convertDT(dr.DTCreated) +
+                mgtDocDescLink(dr),
             ]);
+            mgtDocDescShow(document.getElementById("docPriv_" + ln.strLineID), dr);
         }
     }
+}
+
+//code:20261104 description on management documents (the two boxes above; NEO_MgtGetExamDocs.Description, saved by
+//_MgtSetDocDescription). Only a user of the company that loaded the document can add or change it (the server checks too).
+function mgtCanEditDocDesc(dr) {
+    return MgtPrivateDocsEnabled && !MgtSnapshot && dr.DocFID != null && dr.LoadedByCID == myCID;
+}
+
+// "Add description" / "Edit description" link, appended to the Loaded By line
+function mgtDocDescLink(dr) {
+    if (!mgtCanEditDocDesc(dr)) return "";
+    return "|||label|class=cursor mgtDocDescEdit|style=color:steelblue; padding-left:15px; font-weight:normal|onclick=MgtEditDocDesc(" + dr.DocFID + ")|" +
+        ((dr.Description) ? "Edit description" : "Add description");
+}
+
+// the description under the Loaded By line; set as text, because xsection reads "=" and "|" in its strings as markup
+function mgtDocDescShow(parent, dr) {
+    if (parent == null || !dr.Description) return;
+    var d = document.createElement("div");
+    d.id = "docReq3_" + dr.FID; // removed with the row by delExamDoc
+    d.className = "mgtDocDesc";
+    d.style.cssText = "padding:0 5px 8px 25px; white-space:pre-wrap; font-weight:normal; color:#333";
+    d.textContent = dr.Description;
+    parent.appendChild(d);
+}
+
+var MgtDocDescQueue = [];
+
+// a management document's a_aMGTExamDocs FIDs on a question (before an upload, to find the new ones after it)
+function mgtPrivDocFIDs(LineID) {
+    return jsMgtDocs.filter(d => d.LineID == LineID && d.IsPrivate == 1 && d.DocFID != null).map(d => d.DocFID);
+}
+
+// after a Management only upload: ask for a description of each new document, one at a time (optional)
+function mgtPromptNewDocDescs(LineID, before) {
+    MgtDocDescQueue = mgtPrivDocFIDs(LineID).filter(f => before.indexOf(f) == -1);
+    mgtNextDocDesc();
+}
+
+function mgtNextDocDesc() {
+    if (MgtDocDescQueue.length == 0) return;
+    MgtEditDocDesc(MgtDocDescQueue.shift(), true);
+}
+
+function MgtEditDocDesc(DocFID, fromUpload) {
+    var dr = jsMgtDocs.find(d => d.DocFID == DocFID);
+    if (dr == null) { mgtNextDocDesc(); return; }
+
+    xconfirm(null, [
+        "div|class=hdr|style=background-color:whitesmoke|" + ((fromUpload) ? "Add a description (optional)" : "Document description"),
+        "div|id=mgtDocDescName|style=padding:8px 0; font-weight:bold",
+        "textarea|id=mgtDocDescInput|maxlength=1000|style=width:100%; height:180px; box-sizing:border-box",
+        "div|style=font-size:11px; color:gray; padding-top:4px|" + ((fromUpload) ? "Leave it blank to skip. " : "") + "Up to 1000 characters."
+    ], "MgtSaveDocDesc(" + DocFID + ")");
+    mgtDocDescName.textContent = dr.Filename;
+    mgtDocDescInput.value = dr.Description || "";
+    try { xconfirmContinue.innerHTML = "Save"; } catch (e) { }
+    mgtDocDescInput.focus();
+}
+
+function MgtSaveDocDesc(DocFID) {
+    var dr = jsMgtDocs.find(d => d.DocFID == DocFID);
+    var txt = mgtDocDescInput.value.trim();
+    xconfirm();
+    if (dr != null && txt == (dr.Description || "")) { mgtNextDocDesc(); return; }
+
+    getData(null, newFormData("_MgtSetDocDescription", { fid: DocFID, description: txt }), function (vr) {
+        var js = jparse(vr);
+        if (js.length > 0 && js[0].Msg != null) {
+            MgtDocDescQueue = [];
+            xconfirm(js[0].Msg);
+            return;
+        }
+        jsMgtDocs = js;
+        MGTPopDocs();
+        mgtNextDocDesc();
+    });
 }
 
 //code:20261103 make a document private (makePrivate 1) or share it with the examined company (0). Sharing never asks
@@ -1498,6 +1580,8 @@ function delExamDoc(fid, go, docfid) {
             var xx = document.getElementById("docReq2_" + fid);
             x.parentElement.removeChild(x);
             xx.parentElement.removeChild(xx);
+            var x3 = document.getElementById("docReq3_" + fid); //code:20261104 its description
+            if (x3) x3.parentElement.removeChild(x3);
         });
     }
 }
@@ -1763,12 +1847,14 @@ function submitCMSFiles(xCID, xUID, ExamID, LineID, DocReqID, fromPCorCMS, isPri
     var p = { xcid: xCID, xuid: xUID, examid: ExamID, lineid: LineID, docreqid: DocReqID, FIDS: selectedCMSFiles.join(",") };
     if (isPrivate == 1) { p.private = 1; } //code:20261103 last: adHoc binds by position (@private)
     var data = newFormData("_MGTExamAttachCMSDoc", p);
+    var descBefore = mgtPrivDocFIDs(LineID); //code:20261104
     getData(null, data, function (vr) {
         closePopUp("Select from CMS Files");
 
         jsMgtDocs = jparse(vr);
         MGTPopDocs();
         refreshOFiles();
+        if (isPrivate == 1) mgtPromptNewDocDescs(LineID, descBefore); //code:20261104 ask for a description of each new document
 
         //code:20240522:1133am - remove hover elem when done
         var fh = document.getElementsByClassName("FileHover");
@@ -1778,9 +1864,12 @@ function submitCMSFiles(xCID, xUID, ExamID, LineID, DocReqID, fromPCorCMS, isPri
     });
 }
 
+var MgtUploadDescBefore = []; //code:20261104 private documents on the question before this upload
+
 function MGTUploadDocsGO(xCID, xUID, ExamID, LineID, DocReqID, ix, isPrivate) {
     ix = (ix == null) ? 0 : ix;
     var fils = inputMGTUpload.files;
+    if (ix == 0) MgtUploadDescBefore = mgtPrivDocFIDs(LineID);
 
     if (ix < fils.length) {
         var fil = fils[ix];
@@ -1798,6 +1887,7 @@ function MGTUploadDocsGO(xCID, xUID, ExamID, LineID, DocReqID, ix, isPrivate) {
     } else {
         MGTPopDocs();
         refreshOFiles();
+        if (isPrivate == 1) mgtPromptNewDocDescs(LineID, MgtUploadDescBefore); //code:20261104 ask for a description of each new document
     }
 }
 
@@ -2797,7 +2887,7 @@ function PDFPreview(main) {
     var clonedContent = contentDiv.cloneNode(true);
 
     //code:20261103 never print management-only documents or the private/shared links (the PDF can be shared)
-    clonedContent.querySelectorAll('.mgtPrivateDocs, .mgtDocPrivToggle').forEach(function (e) { e.parentNode.removeChild(e); });
+    clonedContent.querySelectorAll('.mgtPrivateDocs, .mgtDocPrivToggle, .mgtDocDescEdit').forEach(function (e) { e.parentNode.removeChild(e); });
 
     // Remove unwanted elements
     var textboxes = clonedContent.querySelectorAll('textarea');
@@ -3326,7 +3416,7 @@ var MgtSnapReads = {
 };
 
 // exam writes refused by getData while a snapshot is open - they would otherwise write to the LIVE exam
-var MgtSnapBlockedWrites = /^_(MgtUpdateAnswers?|MgtArchiveAnswer|MgtUpdateLMC|MgtUpdateForm|MgtDeleteFormDoc|MGTExamAttachCMSDoc|MGTExamUploadDoc|SetExamDefaultScores|MgtWorkflowRemoveAction|MgtSetDocPrivate)$/;
+var MgtSnapBlockedWrites = /^_(MgtUpdateAnswers?|MgtArchiveAnswer|MgtUpdateLMC|MgtUpdateForm|MgtDeleteFormDoc|MGTExamAttachCMSDoc|MGTExamUploadDoc|SetExamDefaultScores|MgtWorkflowRemoveAction|MgtSetDocPrivate|MgtSetDocDescription)$/;
 
 // [actions[], params[]] -> the snapshot equivalents when a snapshot is open.
 // snapshotid goes FIRST: the adHoc dispatcher binds params positionally in key order (exec NEO_x @uid, @snapshotid, ...)
@@ -3355,6 +3445,7 @@ function setMgtSnapshot(snapshot) {
             "#availExamsInner.mgtSnapRO textarea, #availExamsInner.mgtSnapRO input, #availExamsInner.mgtSnapRO select," +
             "#availExamsInner.mgtSnapRO [onclick*='MgtEditAnswer'], #availExamsInner.mgtSnapRO [onclick*='MGTUpload']," +
             "#availExamsInner.mgtSnapRO [onclick*='MgtToggleDocPrivate']," +
+            "#availExamsInner.mgtSnapRO [onclick*='MgtEditDocDesc']," +
             "#availExamsInner.mgtSnapRO [onclick*='MGTSetDefaultScores'] { pointer-events:none; }" +
             "#availExamsInner.mgtSnapRO textarea, #availExamsInner.mgtSnapRO input { background-color:#f6f6f6; }";
         document.head.appendChild(st);
