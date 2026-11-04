@@ -1401,7 +1401,7 @@ function MGTPopDocs() {
                         "|||label|class=redlink|onclick=delExamDoc(" + dr.FID + ",false," + docFIDRow + ")|x" +
                         "|||label|style=width:10px" +
                         "|||label|icon=" + icon + "|class=cursor|onclick=" + onclick + "|" + dr.Filename +
-                        ((MgtDocsMgtView) ? "|||label|class=cursor mgtDocPrivToggle|style=color:steelblue; padding-left:15px; font-weight:normal|onclick=MgtToggleDocPrivate(" + docFIDRow + ",1)|Make private" : ""),
+                        "", //code:20261104 John: no Make private on document request rows (management documents keep it)
                         "div|id=docReq2_" + dr.FID + "|style=font-weight:bold; padding:left:10px; padding:5px|Loaded By: " + dr.LoadedByName + " with " + dr.LoadedByCompany + " on " + convertDT(dr.DTCreated),
                     ]);
                     mgtDocDescShow(subsect, dr); //code:20261104 a management document shared back under its request keeps its description
