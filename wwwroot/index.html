@@ -2271,13 +2271,42 @@
             .then(function (res) { cmsOrigin = res.origin || null; })
             .catch(function () { });
 
+        // 2026-11-06: people use CMS at its own domain (qa.cms-services.net, ...), not the
+        // azurewebsites address in AppSettings:CmsUrl, so the origin check refused the code,
+        // CMS got no ack and reloaded this tab after 1.5 s, and the login screen showed in the
+        // meantime. Trusted: CmsUrl's origin, or any https origin on cms-services.net (the
+        // company's own domain). A code is still single-use, 60-second, and issued by CMS only
+        // to the signed-in CMS user.
+        function isTrustedCmsOrigin(origin) {
+            if (cmsOrigin && origin === cmsOrigin) return true;
+            try {
+                var u = new URL(origin);
+                return u.protocol === "https:" && (u.hostname === "cms-services.net" || /\.cms-services\.net$/.test(u.hostname));
+            } catch (e) { return false; }
+        }
+
+        // While a code from CMS is being exchanged, show "Signing you in..." instead of the
+        // login form, so it doesn't look like the user has to log in.
+        function showSigningIn() {
+            if (document.getElementById("appScreen").style.display === "block") return;
+            document.getElementById("loginScreen").style.display = "none";
+            var start = document.getElementById("startScreen");
+            start.innerHTML = "<img src='loading.gif' width='32' height='32' alt='' /><br /><br />Signing you in. Please wait ...";
+            start.style.display = "block";
+        }
+
         window.addEventListener("message", function (event) {
             if (!event.data || typeof event.data.mbxHandoff !== "string") return;
-            if (!cmsOrigin || event.origin !== cmsOrigin) return;
+            if (!isTrustedCmsOrigin(event.origin)) return;
             if (event.source) event.source.postMessage({ mbxHandoffAck: true }, event.origin);
+            showSigningIn();
 
             redeemHandoff(event.data.mbxHandoff).then(function (res) {
-                if (!res) return;
+                if (!res) {
+                    // Code refused: back to whatever was showing (the login form if not signed in).
+                    if (document.getElementById("appScreen").style.display !== "block") showLogin();
+                    return;
+                }
                 if (document.getElementById("appScreen").style.display !== "block") {
                     if (res.messageId) window.history.replaceState({}, "", window.location.pathname + "?message=" + res.messageId);
                     showApp(); // opens ?message= once and strips it
