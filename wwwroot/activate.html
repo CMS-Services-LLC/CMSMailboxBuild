@@ -99,6 +99,9 @@
             <div class="steps">Step 3 of 3</div>
             <h2>Save your backup codes</h2>
             <p class="sub">Your account is active. If you lose your phone, each of these codes can be used <b>once</b> in place of an authenticator code.</p>
+            <!-- The username again (it was only on step 1): setup signs straight in, so this is the
+                 last place it's shown before the user next needs it to sign in. -->
+            <div class="user" style="margin-bottom:12px">From now on, sign in to CMS and CMS Secure Email with username <b id="usernameDone"></b> and the password you just created.</div>
             <div class="codes" id="codes"></div>
             <div class="warn">These codes are shown only this one time. Store them somewhere safe, not in the same place as your password.
                 <span id="codesReplace" class="hidden"><br>They replace any backup codes you were given before for this email address.</span></div>
@@ -226,6 +229,7 @@
                     if (res.status !== "ok") { show("stepInvalid"); return; }
                     document.getElementById("hello").innerText = "Welcome, " + (res.firstName || "there");
                     document.getElementById("username").innerText = res.username;
+                    document.getElementById("usernameDone").innerText = res.username;
                     if (res.hasAuthenticator) {
                         document.getElementById("totpTitle").innerText = "Confirm with your authenticator app";
                         document.getElementById("totpExisting").classList.remove("hidden");

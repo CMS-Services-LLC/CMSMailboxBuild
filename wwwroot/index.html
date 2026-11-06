@@ -255,6 +255,7 @@
                         <option value="">All</option>
                         <option value="Pending">Pending</option>
                         <option value="Completed">Completed</option>
+                        <option value="Cancelled">Cancelled</option>
                     </select>
                 </div>
                 <div id="bulkBar">
@@ -620,8 +621,8 @@
         // already returned (subject, sender, company, recipients, and the names of the
         // message's items and tasks, sql/022) — no extra request.
         // The task filter uses each message's TaskState (sql/022): Pending while any of
-        // its tasks isn't Completed, Completed once all are; messages without tasks
-        // show only under All.
+        // its tasks isn't Completed, Completed once all are, Cancelled if every task
+        // was cancelled; messages without tasks show only under All.
         var folderRows = [];
 
         // ---- Sharing a task you were assigned (sql/028, TaskController) ---------------

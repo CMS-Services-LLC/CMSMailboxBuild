@@ -122,12 +122,16 @@ namespace CMSMailbox
 
         // The first-time setup email for a message sent from the mailbox itself. Same wording as CMS's
         // (MailboxShareController.SendActivationEmailIfNeeded); keep the two in step. False if it didn't send.
-        public static bool SendActivation(string email, int toUid, string firstName, string link)
+        public static bool SendActivation(string email, int toUid, string firstName, string link, string username = null)
         {
             string body =
                 "<p>Hello " + System.Net.WebUtility.HtmlEncode(firstName) + ",</p>" +
                 "<p>Welcome to CMS Secure Email.</p>" +
                 "<p>An account has been created for you. To get started, you must set your password and enable two-factor authentication (2FA). This only takes a couple of minutes.</p>" +
+                // 2026-11-06 (John): the username too; setup signs straight in, so people didn't know it afterwards.
+                (string.IsNullOrWhiteSpace(username) ? "" :
+                    "<p><b>Your username:</b> " + System.Net.WebUtility.HtmlEncode(username) +
+                    "<br>You'll sign in to CMS and CMS Secure Email with this username and the password you create.</p>") +
                 "<p><b>Activate your account:</b><br><a href=\"" + link + "\">" + link + "</a></p>" +
                 "<p>This link is unique to you and will expire in " + ActivationHours + " hours. It can only be used once.</p>" +
                 "<p><b>What to expect:</b></p>" +
