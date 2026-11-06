@@ -136,7 +136,10 @@ namespace CMSMailbox.Controllers
 
             // The token rides in the fragment (#), which browsers never send to a server or in a Referer.
             string link = DB.Url.TrimEnd('/') + "/activate.html#t=" + token;
-            if (Mail.SendActivation(email, toUid, firstName, link)) return true;
+            // The recipient's CMS username, shown in the email (2026-11-06). Read-only lookup of the one recipient.
+            var un = DB.GetDB("select UserName from Users where UID = @xuid", fromUid, new JObject { ["xuid"] = toUid }.ToString());
+            string username = (un.Rows.Count > 0 && un.Columns.Contains("UserName")) ? un.Rows[0]["UserName"]?.ToString() : null;
+            if (Mail.SendActivation(email, toUid, firstName, link, username)) return true;
 
             // Send failed: retire the unsent link (logged as 'ActivationEmailFailed'); the caller sends the plain notification.
             DB.GetDB("exec MBX_ActivationEmailFailed @uid, @tokenHash", fromUid, new JObject { ["tokenHash"] = tokenHash }.ToString());
