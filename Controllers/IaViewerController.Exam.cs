@@ -31,8 +31,9 @@ namespace CMSMailbox.Controllers
     //      message they received or sent, their company tree reaches the examined
     //      company (AccessTreeDown, same rule as exam snapshots), and the exam is still
     //      shared with that company;
-    //   2. is on the allowlist for the caller's role (no heatmap report, PDF, zip or
-    //      snapshots for either; scoring writes for the Assigner only);
+    //   2. is on the allowlist for the caller's role (no snapshots for either; scoring and
+    //      heatmap form writes for the Assigner only; Print to PDF / Heatmap Report / Zip go
+    //      through the exam/{item}/export, heatmap-doc and zip routes below);
     //   3. is pinned to the task: any examid must be the task's, any xcid becomes the
     //      examined company; answer edits/archives must be the task exam's answers written
     //      by the caller's company; deletes must be the caller's own upload on that exam;
@@ -56,6 +57,8 @@ namespace CMSMailbox.Controllers
             "_MgtGetWorkflowStatus", "_MgtGetWorkflow", "_MgtGetWorkflowRecentRemoval", "_MgtGetWorkflowRecipients",
             // the report by question, in exam order (CMS sql 006; _MgtGetWorkflow stays for older pages)
             "_MgtGetWorkflowLines",
+            // Heatmap Report (Actions dropdown, 2026-11-09): the heatmap statements, pinned to the task's exam
+            "_MgtGetHeatmap",
             // Document request "+" > From CMS: the caller's own CMS files for the examined
             // company. Only while the task can still change, and the file cache is rebuilt
             // first (see ExamAdHoc).
@@ -75,7 +78,9 @@ namespace CMSMailbox.Controllers
             "_SetExamDefaultScores", "_MgtUpdateLMC",
             // The one-hour "remove from the Workflow" answer — management side only (the proc
             // re-checks that too); the action must be on this task's exam (CheckExamWrite).
-            "_MgtWorkflowRemoveAction"
+            "_MgtWorkflowRemoveAction",
+            // Heatmap Report > Edit Heatmap Form (onsite dates/address, examiners, participants), pinned to the task
+            "_MgtUpdateForm"
         };
 
         private class ExamTaskContext
@@ -511,6 +516,138 @@ namespace CMSMailbox.Controllers
             string fileName = resp.Content.Headers.ContentDisposition?.FileNameStar ?? resp.Content.Headers.ContentDisposition?.FileName?.Trim('"');
             if (string.IsNullOrEmpty(fileName)) fileName = "Workflow.pdf";
             return (bytes, fileName);
+        }
+
+        // ---- Print to PDF, Heatmap Report, Exam Zip Options (John, 2026-11-09) ------------
+        // The exam's Actions dropdown offers these here too. The page builds the HTML exactly as
+        // CMSNEO's does; CMSNEO turns it into the file (GemBox and its license stay there), as THIS
+        // user with a one-off token (NEO_GetUserToken), like the workflow PDF above. Every route
+        // checks the exam task first and pins the exam to it. The Heatmap Report is the
+        // management view's (Assigner/Viewer), as in CMSNEO where it needs an examined company.
+
+        private const long ExamExportMaxBytes = 60L * 1024 * 1024;
+
+        // kind = pdf (Print to PDF, Heatmap PDF) or docx (Heatmap Docx): CMSNEO BuildiPDF / BuildDOCX.
+        [HttpPost("exam/{messageItemId:int}/export")]
+        [RequestSizeLimit(ExamExportMaxBytes)]
+        [RequestFormLimits(ValueLengthLimit = (int)ExamExportMaxBytes, MultipartBodyLengthLimit = ExamExportMaxBytes)]
+        public async Task<IActionResult> ExamExport(int messageItemId, [FromForm] string kind, [FromForm] string html,
+            [FromForm] string filename, [FromForm] string header, [FromForm] string footer)
+        {
+            int uid = CurrentUID();
+            if (uid == 0) return Unauthorized();
+            var ctx = ResolveExamTask(messageItemId, uid);
+            if (ctx == null) return NotFound();
+            if (string.IsNullOrEmpty(html)) return BadRequest();
+
+            bool docx = string.Equals(kind, "docx", StringComparison.OrdinalIgnoreCase);
+            var fields = new Dictionary<string, string>
+            {
+                ["HTML"] = html,
+                ["filename"] = string.IsNullOrWhiteSpace(filename) ? (ctx.ExamName == "" ? "Exam" : ctx.ExamName) : filename,
+                ["header"] = header ?? "",
+                ["footer"] = footer ?? ""
+            };
+            var file = await ProxyExamFileToCms(uid, docx ? "/BuildDOCX" : "/BuildiPDF", fields);
+            if (file == null) { LogAccess(messageItemId, uid, "Error", "exam export " + (docx ? "docx" : "pdf") + ": CMSNEO did not return it"); return NotFound(); }
+
+            LogAccess(messageItemId, uid, "Served", "exam export " + (docx ? "docx" : "pdf"));
+            return File(file.Value.Bytes, file.Value.ContentType, file.Value.FileName ?? (fields["filename"] + (docx ? ".docx" : ".pdf")));
+        }
+
+        // The heatmap's static pages (CMSNEO GetMGTExamDoc), for the task's exam only.
+        [HttpPost("exam/{messageItemId:int}/heatmap-doc")]
+        public async Task<IActionResult> ExamHeatmapDoc(int messageItemId)
+        {
+            int uid = CurrentUID();
+            if (uid == 0) return Unauthorized();
+            var ctx = ResolveExamTask(messageItemId, uid);
+            if (ctx == null) return NotFound();
+            if (ctx.Role != "Assigner" && ctx.Role != "Viewer") { LogAccess(messageItemId, uid, "Denied", "exam heatmap doc: management view only"); return Content(""); }
+
+            string token = MintCmsToken(uid);
+            if (token == null || string.IsNullOrEmpty(DB.CmsUrl)) return Content("");
+            var client = _httpClientFactory.CreateClient("CmsProxy");
+            string url = DB.CmsUrl.TrimEnd('/') + "/GetMGTExamDoc?ExamID=" + Uri.EscapeDataString(ctx.ExamID) + "&token=" + Uri.EscapeDataString(token);
+            try
+            {
+                var resp = await client.GetAsync(url);
+                if (!resp.IsSuccessStatusCode) { _logger.LogWarning("exam heatmap doc: CMSNEO responded {Status}", (int)resp.StatusCode); return Content(""); }
+                LogAccess(messageItemId, uid, "Served", "exam heatmap doc");
+                return Content(await resp.Content.ReadAsStringAsync(), "text/html");
+            }
+            catch (Exception ex) { _logger.LogWarning("exam heatmap doc: request to CMSNEO threw {Reason}", DescribeException(ex)); return Content(""); }
+        }
+
+        // Exam Zip Options: CMSNEO CreateExamZip, pinned to the task's exam and examined company.
+        [HttpPost("exam/{messageItemId:int}/zip")]
+        [RequestSizeLimit(ExamExportMaxBytes)]
+        [RequestFormLimits(ValueLengthLimit = (int)ExamExportMaxBytes, MultipartBodyLengthLimit = ExamExportMaxBytes)]
+        public async Task<IActionResult> ExamZip(int messageItemId)
+        {
+            int uid = CurrentUID();
+            if (uid == 0) return Unauthorized();
+            var ctx = ResolveExamTask(messageItemId, uid);
+            if (ctx == null) return NotFound();
+
+            var f = Request.Form;
+            if (!string.Equals(f["examGUID"].ToString(), ctx.ExamID, StringComparison.OrdinalIgnoreCase))
+            { LogAccess(messageItemId, uid, "Denied", "exam zip: examid is not the task's exam"); return NotFound(); }
+            string xcid = f["xCID"].ToString();
+            if (xcid != "0" && xcid != ctx.ExamCID.ToString())
+            { LogAccess(messageItemId, uid, "Denied", "exam zip: xcid is not the examined company"); return NotFound(); }
+
+            bool mgtView = ctx.Role == "Assigner" || ctx.Role == "Viewer";
+            var fields = new Dictionary<string, string>
+            {
+                ["examGUID"] = ctx.ExamID,
+                ["xCID"] = ctx.ExamCID.ToString(),
+                ["zipFilename"] = f["zipFilename"].ToString(),
+                // the heatmap is the management view's only (see above)
+                ["heatmap"] = mgtView ? f["heatmap"].ToString() : "false",
+                ["pdf"] = f["pdf"].ToString(),
+                ["attachments"] = f["attachments"].ToString(),
+                ["examHTML"] = f["examHTML"].ToString(),
+                ["heatmapHTML"] = mgtView ? f["heatmapHTML"].ToString() : ""
+            };
+            var file = await ProxyExamFileToCms(uid, "/CreateExamZip", fields);
+            if (file == null) { LogAccess(messageItemId, uid, "Error", "exam zip: CMSNEO did not return it"); return NotFound(); }
+
+            LogAccess(messageItemId, uid, "Served", "exam zip");
+            return File(file.Value.Bytes, "application/zip", file.Value.FileName ?? ((fields["zipFilename"] == "" ? "ExamZip" : fields["zipFilename"]) + ".zip"));
+        }
+
+        private static string MintCmsToken(int uid)
+        {
+            var mint = DB.GetDB("exec NEO_GetUserToken @uid", uid);
+            string t = (mint.Rows.Count > 0 && mint.Columns.Contains("Token")) ? mint.Rows[0]["Token"].ToString() : null;
+            return string.IsNullOrEmpty(t) ? null : t;
+        }
+
+        // POSTs the fields (plus a fresh token) to a CMSNEO route as multipart and returns the file it sends back.
+        private async Task<(byte[] Bytes, string ContentType, string FileName)?> ProxyExamFileToCms(int uid, string path, Dictionary<string, string> fields)
+        {
+            if (string.IsNullOrEmpty(DB.CmsUrl)) { _logger.LogWarning("exam export: AppSettings:CmsUrl is not set"); return null; }
+            string token = MintCmsToken(uid);
+            if (token == null) { _logger.LogWarning("exam export: NEO_GetUserToken returned no token"); return null; }
+
+            using var content = new MultipartFormDataContent();
+            foreach (var kv in fields) content.Add(new StringContent(kv.Value ?? ""), kv.Key);
+            content.Add(new StringContent(token), "token");
+
+            var client = _httpClientFactory.CreateClient("CmsProxy");
+            client.Timeout = TimeSpan.FromMinutes(5); // big exams: PDF + heatmap + every attachment
+            HttpResponseMessage resp;
+            try { resp = await client.PostAsync(DB.CmsUrl.TrimEnd('/') + path, content); }
+            catch (Exception ex) { _logger.LogWarning("exam export {Path}: request to CMSNEO threw {Reason}", path, DescribeException(ex)); return null; }
+            if (!resp.IsSuccessStatusCode) { _logger.LogWarning("exam export {Path}: CMSNEO responded {Status}", path, (int)resp.StatusCode); return null; }
+
+            string ct = resp.Content.Headers.ContentType?.MediaType ?? "application/octet-stream";
+            // BuildiPDF / BuildDOCX answer a bad token with an HTML error page, not a 401
+            if (ct.StartsWith("text/", StringComparison.OrdinalIgnoreCase)) { _logger.LogWarning("exam export {Path}: CMSNEO returned {Type}, not a file", path, ct); return null; }
+            var bytes = await resp.Content.ReadAsByteArrayAsync();
+            string fileName = resp.Content.Headers.ContentDisposition?.FileNameStar ?? resp.Content.Headers.ContentDisposition?.FileName?.Trim('"');
+            return (bytes, ct, string.IsNullOrEmpty(fileName) ? null : fileName);
         }
 
         private static void MarkExamStarted(int messageItemId, int uid)
