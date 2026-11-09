@@ -112,19 +112,24 @@
         #composeTo label { display: block; font-size: 13px; padding: 2px 0; cursor: pointer; }
         .itemCard { border: 1px solid #ddd; border-radius: 4px; padding: 10px; margin: 8px 0; background: #fff; }
         /* Dynamic Report viewer (drView*) — see loadDRReport()/openDRRow(). */
-        .drTableWrap { max-height: 300px; overflow: auto; border: 1px solid #ddd; margin-top: 8px; }
-        .drTable { border-collapse: collapse; font-size: 12px; width: 100%; }
-        .drTable th { position: sticky; top: 0; background: #f0f4fa; text-align: left; padding: 4px 6px; border-bottom: 1px solid #ccc; white-space: nowrap; }
-        .drTable td { padding: 4px 6px; border-bottom: 1px solid #eee; white-space: nowrap; }
-        .drTable tr.drRow { cursor: pointer; }
-        .drTable tr.drRow:hover { background: #eef4ff; }
-        .drTable tr.drRow.selected { background: #dce8ff; }
+        /* Report rows use global.js's xTable grid (2026-11-09, John), styles copied from CMS site.css. */
+        .drXtWrap { height: 300px; border: 1px solid #ddd; margin-top: 8px; font-size: 12px; }
+        .drView.mbx-iframe-fullscreen .drXtWrap { height: 55vh; }
+        .drXtWrap .drXtRow { cursor: pointer; }
+        .drXtWrap .drXtRow.hover { background-color: #eef4ff; }
+        .drXtWrap .drXtRow.selected { background-color: #dce8ff; }
+        .xtableHdr, .xtableHdrSort, .xtableCol { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; padding: 5px; display: inline-block; position: relative; box-sizing: content-box; }
+        .xtableHdr { background-image: linear-gradient(white, rgb(229,234,244)); }
+        .xtableHdr:hover { background-image: linear-gradient(whitesmoke, lightblue); border-right: solid 1px gray; }
+        .xtableHdrSort { background-image: linear-gradient(white, orange); }
+        .xtableHdrSort:hover { background-image: linear-gradient(whitesmoke, lightblue); border-right: solid 1px gray; }
+        .xtableCol0 { background-color: whitesmoke; }
+        .xtableCol1 { background-color: white; }
         .drPanel { border: 1px solid #ccd; border-radius: 4px; padding: 10px; margin-top: 8px; background: #fafbff; }
         .drPanel h4 { margin: 12px 0 6px 0; }
         /* A report opens only fullscreen (mbxOpenItem, kind "dr"); hidden until then. */
         .drView.mbx-dr-closed { display: none; }
         .drView.mbx-iframe-fullscreen { overflow: auto; padding: 12px 16px; box-sizing: border-box; }
-        .drView.mbx-iframe-fullscreen .drTableWrap { max-height: 55vh; }
         .drFields td { padding: 3px 6px; font-size: 13px; vertical-align: top; }
         .drFields input { width: 100%; box-sizing: border-box; }
         .drList { font-size: 12px; border-collapse: collapse; width: 100%; }
@@ -288,6 +293,9 @@
     <div id="mbxSavedNotice"></div>
     <div id="newMailToast" title="Open"></div>
 
+    <!-- global.js for xTable (Dynamic Report rows). Loaded BEFORE the page script so this page's
+         own heartbeat() and logout() (the only names both define) replace global.js's. -->
+    <script src="js/global.js" asp-append-version="true"></script>
     <script>
         var apiBase = "";
         var token = sessionStorage.getItem("mbxToken") || "";
@@ -1538,15 +1546,34 @@
                     cols = cols.filter(function (c) { return c !== "Attachments"; })
                         .concat(cols.indexOf("Attachments") > -1 ? ["Attachments"] : []);
 
-                    var html = "<p class='hint' style='margin:8px 0 0 0'>Click a row to see its details, notes and attachments.</p>" +
-                        "<div class='drTableWrap'><table class='drTable'><tr>" +
-                        cols.map(function (c) { return "<th>" + escapeHtml(c.replace(/_/g, " ")) + "</th>"; }).join("") + "</tr>";
-                    rows.forEach(function (row) {
-                        html += "<tr class='drRow' id='drRow_" + messageItemId + "_" + row.xxxID + "' onclick='openDRRow(" + messageItemId + "," + row.xxxID + ")'>" +
-                            cols.map(function (c) { return "<td>" + escapeHtml(row[c] == null ? "" : row[c]) + "</td>"; }).join("") + "</tr>";
+                    // 2026-11-09 (John): rows in global.js's xTable grid (sort, resize, Excel-style
+                    // column filters), the same grid CMS's reports use. Values are written as text
+                    // (recipients are outside companies); "date" columns get CMS's Central-time format.
+                    div.innerHTML = "<p class='hint' style='margin:8px 0 0 0'>Click a row to see its details, notes and attachments.</p>" +
+                        "<div class='drXtWrap' id='drXt_" + messageItemId + "'></div><div id='drPanel_" + messageItemId + "'></div>";
+                    var rowKey = function (drid) { return "drXtRow_" + messageItemId + "_" + drid; };
+                    var rowCells = function (drid) { return document.querySelectorAll("#drXt_" + messageItemId + " ." + rowKey(drid)); };
+                    // xTable sorts by text, so keep the report's own order with a zero-padded key
+                    // (not a column) until a header is clicked.
+                    rows.forEach(function (row, ix) { row.drXtOrder = ("00000000" + ix).slice(-8); });
+                    xTable(document.getElementById("drXt_" + messageItemId), {
+                        hdrs: cols,
+                        js: rows,
+                        sort: "drXtOrder",
+                        func: function (row, ix, hdr, elem) {
+                            if (hdr) {
+                                var v = row[hdr];
+                                if (hdr.toLowerCase().indexOf("date") > -1) v = convertDTCentral(v);
+                                elem.textContent = v == null ? "" : String(v).replace(/ZREMOVE/g, "");
+                            }
+                            return {
+                                class: "drXtRow " + rowKey(row.xxxID),
+                                mouseover: function () { rowCells(row.xxxID).forEach(function (c) { c.classList.add("hover"); }); },
+                                mouseout: function () { rowCells(row.xxxID).forEach(function (c) { c.classList.remove("hover"); }); },
+                                click: function () { openDRRow(messageItemId, row.xxxID); }
+                            };
+                        }
                     });
-                    html += "</table></div><div id='drPanel_" + messageItemId + "'></div>";
-                    div.innerHTML = html;
                     if (reopenDrid) openDRRow(messageItemId, reopenDrid);
                 })
                 .catch(function () { div.innerHTML = "<p class='err'>This report couldn't be loaded.</p>"; });
@@ -1555,8 +1582,8 @@
         function openDRRow(messageItemId, drid) {
             var panel = document.getElementById("drPanel_" + messageItemId);
             if (!panel) return;
-            document.querySelectorAll("#drView_" + messageItemId + " tr.drRow").forEach(function (tr) {
-                tr.classList.toggle("selected", tr.id === "drRow_" + messageItemId + "_" + drid);
+            document.querySelectorAll("#drView_" + messageItemId + " .drXtRow").forEach(function (c) {
+                c.classList.toggle("selected", c.classList.contains("drXtRow_" + messageItemId + "_" + drid));
             });
             panel.innerHTML = "<div class='drPanel'><p class='hint'>Loading ...</p></div>";
 
@@ -1656,7 +1683,7 @@
 
         function closeDRRow(messageItemId) {
             document.getElementById("drPanel_" + messageItemId).innerHTML = "";
-            document.querySelectorAll("#drView_" + messageItemId + " tr.drRow.selected").forEach(function (tr) { tr.classList.remove("selected"); });
+            document.querySelectorAll("#drView_" + messageItemId + " .drXtRow.selected").forEach(function (c) { c.classList.remove("selected"); });
         }
 
         function saveDRRow(messageItemId, drid) {

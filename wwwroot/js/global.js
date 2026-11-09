@@ -9085,23 +9085,14 @@ function xTable(main, jo) {
             const rect = el.getBoundingClientRect();
             const clickX = e.clientX - rect.left;
 
-            //sort by header
-            if (rect.width - clickX > 10) {
-                if (hdr != "xCorner") {
-                    if (jo.sort == hdr)
-                        jo.sortDesc = (jo.sortDesc) ? null : true;
-                    else
-                        jo.sortDesc = null;
-
-                    jo.sort = hdr;
-                    xTable(main);
-                }
-                window.getSelection().removeAllRanges();
-            }
+            //a press on the right-edge grip is always a resize, never a sort
+            const onEdge = (rect.width - clickX <= 10);
+            window.getSelection().removeAllRanges();
 
             // Store starting width and mouse position
             const startWidth = rect.width;
             const startX = e.clientX;
+            const DRAG_THRESHOLD = 4; //px of movement before a press counts as a resize drag instead of a click
             let didResize = false;
 
             // Change the cursor for the whole page during the drag
@@ -9111,6 +9102,10 @@ function xTable(main, jo) {
                 window.getSelection().removeAllRanges();
                 const currentX = moveEvent.clientX;
                 const deltaX = currentX - startX;
+
+                //ignore tiny jitter so a plain click still sorts
+                if (!didResize && Math.abs(deltaX) < DRAG_THRESHOLD)
+                    return;
                 el.style.cursor = 'col-resize';
 
                 // Set new width, ensuring it doesn't shrink below a minimum size (e.g., 30px)
@@ -9133,6 +9128,18 @@ function xTable(main, jo) {
                 // notify the caller so column widths can be persisted (opt-in via jo.onColResize)
                 if (didResize && typeof jo.onColResize === 'function')
                     jo.onColResize(hdr, jo.wds[hdr], jo.wds);
+
+                //sort by header — only on a plain click (no drag, not on the resize edge), and only after
+                //release, so rebuilding the table can't interrupt a resize in progress
+                if (!didResize && !onEdge && hdr != "xCorner") {
+                    if (jo.sort == hdr)
+                        jo.sortDesc = (jo.sortDesc) ? null : true;
+                    else
+                        jo.sortDesc = null;
+
+                    jo.sort = hdr;
+                    xTable(main);
+                }
             }
 
             // Attach listeners to document so dragging works even if mouse leaves the div
@@ -9217,6 +9224,13 @@ function xTable(main, jo) {
             icon.addEventListener("mousedown", function (e) { e.stopPropagation(); });
             icon.addEventListener("click", function (e) { xtOpenColFilter(e, main, jo, hdrName); });
         })(jo.hdrs[i]);
+    }
+
+    //top corner only holds &nbsp; (or the small column icon), so it comes out shorter than headers with a filter icon — match their height
+    var hdr0 = getid(main.id + "_xtHdr_@id", 0);
+    if (hdr0 && hdr0.offsetHeight > 0) {
+        xCorner.style.boxSizing = "border-box";
+        xCorner.style.height = hdr0.offsetHeight + "px";
     }
 
     //COLUMNS
@@ -9329,6 +9343,7 @@ function xTable(main, jo) {
     if (jo.onload)
         jo.onload(jo);
 }
+
 
 
 //returns jo.js rows matching every active column filter except excludeHdr (excludeHdr lets the
