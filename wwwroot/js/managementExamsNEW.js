@@ -2662,11 +2662,16 @@ function showPreviewQuestions() {
 function PDFPreview(main) {
     var ix = main.id.split("_")[1];
     // Header styling
-    document.getElementById("PopUp_" + ix + "_hdr").style.backgroundColor = "rgb(31, 41, 67)";
-    document.getElementById("PopUp_" + ix + "_hdr").style.color = "white";
-    document.getElementById("PopUp_" + ix + "_hdr").style.height = "50px";
-    document.getElementById("PopUp_" + ix + "_hdr").style.borderRadius = "5px";
-    document.getElementById("btnPopUpClose_" + ix).className = "ugCancelBtn excludePrint";
+    //code:20261109 only when opened as a popup - the zip export calls this with a plain hidden div
+    //(no PopUp_<ix>_hdr), and throwing here left the exam PDF out of the zip
+    var pdfHdr = document.getElementById("PopUp_" + ix + "_hdr");
+    if (pdfHdr) {
+        pdfHdr.style.backgroundColor = "rgb(31, 41, 67)";
+        pdfHdr.style.color = "white";
+        pdfHdr.style.height = "50px";
+        pdfHdr.style.borderRadius = "5px";
+        document.getElementById("btnPopUpClose_" + ix).className = "ugCancelBtn excludePrint";
+    }
     var examVal = document.getElementById('examVal').innerText;
    // console.log(examVal);
     var assignedToVal = (document.getElementById('assignedToVal')) ? document.getElementById('assignedToVal').innerText : "";
@@ -3098,6 +3103,16 @@ function createExamZipFile(ExamID, xCID) {
         document.body.appendChild(form);
         form.submit();
         document.body.removeChild(form);
+
+        //code:20261109 say what was left out instead of a zip that is silently missing the PDF / heatmap
+        var missing = [];
+        if (includePDF && !examHTML) { missing.push("The exam PDF could not be built."); }
+        if (includeHeatmap && !heatmapHTML) {
+            missing.push((jsMgtHeatmapForm && jsMgtHeatmapForm["FormCompleted"])
+                ? "The Heatmap Report could not be built."
+                : "The Heatmap Report was left out: the Heatmap Form has not been completed (Actions > Heatmap Report > Edit Heatmap Form).");
+        }
+        if (missing.length > 0) { xconfirm("Your zip is downloading without some items:<br><br>" + missing.join("<br>")); }
     });
 }
 

@@ -29,12 +29,11 @@
   /* Out of scope for the mailbox (WizardAssignments_Plan.md Phase 3): the examined
      company answers questions and supplies document requests here; everything else
      stays in CMSNEO. managementExamsNEW.js is copied UNCHANGED, so these are hidden
-     here rather than edited out of it. Print to PDF, Exam Zip Options, Snapshots and
-     Heatmap Report now live in the exam's "Actions" dropdown, which the addExamAction
-     override below limits to Workflow; the dropdown stays hidden until Workflow arrives. */
+     here rather than edited out of it. The exam's "Actions" dropdown offers Print to PDF,
+     Heatmap Report, Exam Zip Options and Workflow (not Snapshots); see the addExamAction
+     override below. */
   #ExamHeader a,                                   /* "< Back to Exams Selection" */
   #sectExamSharing { display: none !important; }
-  #examActionsWrap { display: none; }
 
   /* View-only once the task is Completed (the server refuses writes then too). */
   body.mbx-readonly .ocInput { pointer-events: none; background: #f4f4f4; }
@@ -212,14 +211,101 @@
       });
     };
 
-    // The exam's Actions dropdown: only Workflow is offered here (Print to PDF, Zip,
-    // Snapshots and Heatmap Report stay in CMSNEO). The dropdown shows once it has an entry.
+    // The exam's Actions dropdown: everything CMSNEO offers except Snapshots (they write
+    // to the exam outside the task). Print to PDF, Heatmap Report and Exam Zip Options
+    // (John, 2026-11-09) build the same HTML as in CMSNEO; the file itself comes from
+    // this app's exam/{item}/export | heatmap-doc | zip routes, which check the task and
+    // have CMSNEO build it as this user. The same conditions as CMSNEO decide whether an
+    // entry is added (Heatmap Report: management view; Zip: the exam has documents).
     var mbxOrigAddExamAction = addExamAction;
     addExamAction = function (label, fn) {
-      if (label !== "Workflow") return;
+      if (label === "Snapshots") return;
       mbxOrigAddExamAction(label, fn);
-      var w = document.getElementById("examActionsWrap");
-      if (w) w.style.display = "inline";
+    };
+
+    // Downloads a file from one of this app's exam routes (Bearer = this app's login).
+    function mbxExamDownload(route, fd, fallbackName) {
+      xconfirm("Preparing your download ...");
+      fetch("exam/" + MBX_CurrentMessageItemId + "/" + route, {
+        method: "POST",
+        headers: { "Authorization": "Bearer " + sessionStorage.getItem("mbxToken") },
+        body: fd
+      }).then(function (r) {
+        if (!r.ok) throw new Error("failed");
+        var disp = r.headers.get("Content-Disposition") || "";
+        var m = /filename\*=UTF-8''([^;]+)/i.exec(disp) || /filename="?([^";]+)"?/i.exec(disp);
+        return r.blob().then(function (b) { return { blob: b, name: m ? decodeURIComponent(m[1]) : fallbackName }; });
+      }).then(function (f) {
+        xconfirm();
+        var url = URL.createObjectURL(f.blob);
+        var a = document.createElement("a");
+        a.href = url; a.download = f.name || "download";
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+      }).catch(function () { xconfirm("The file couldn't be created. Please try again."); });
+    }
+
+    // Print to PDF > Print PDF (CMSNEO: storeHTML + ExportHTML2PDF in a new window).
+    exportHTML2PDF = function (container, filename) {
+      var fd = new FormData();
+      fd.append("kind", "pdf");
+      fd.append("html", document.getElementById(container).innerHTML);
+      fd.append("filename", filename || "");
+      mbxExamDownload("export", fd, (filename || "Exam") + ".pdf");
+    };
+
+    // Heatmap Report PDF / Docx (CMSNEO: windowLoad to BuildiPDF / BuildDOCX). The zip
+    // export swaps this out for a moment to capture the HTML, as it does in CMSNEO.
+    exportPDFDoc = function (divName, pdfDoc, header, footer, filename) {
+      var docx = (pdfDoc == "DOCX");
+      var fd = new FormData();
+      fd.append("kind", docx ? "docx" : "pdf");
+      fd.append("html", document.getElementById(divName).innerHTML);
+      fd.append("filename", filename || "ExportPDF");
+      fd.append("header", header || "");
+      fd.append("footer", footer || "");
+      mbxExamDownload("export", fd, (filename || "ExportPDF") + (docx ? ".docx" : ".pdf"));
+    };
+
+    // The heatmap's static pages: CMSNEO's GetMGTExamDoc, through exam/{item}/heatmap-doc.
+    var mbxOrigGetData = getData;
+    getData = function (url, data, func, json, noload, actionIndex) {
+      if (url !== "GetMGTExamDoc") return mbxOrigGetData(url, data, func, json, noload, actionIndex);
+      fetch("exam/" + MBX_CurrentMessageItemId + "/heatmap-doc", {
+        method: "POST",
+        headers: { "Authorization": "Bearer " + sessionStorage.getItem("mbxToken") }
+      }).then(function (r) { return r.ok ? r.text() : ""; })
+        .catch(function () { return ""; })
+        .then(function (t) { if (func) func(t || ""); });
+    };
+
+    // Exam Zip Options > Create Zip File: CMSNEO's createExamZipFile, but the zip comes
+    // from exam/{item}/zip instead of a form post to CMSNEO's CreateExamZip.
+    createExamZipFile = function (ExamID, xCID) {
+      var includeHeatmap = document.getElementById("chkIncludeHeatmap").checked;
+      var includePDF = document.getElementById("chkIncludePDF").checked;
+      var includeAttachments = document.getElementById("chkIncludeAttachments").checked;
+      var zipFilename = document.getElementById("txtZipFilename").value.trim();
+      document.getElementById("filenameError").style.display = "none";
+      document.getElementById("checkboxError").style.display = "none";
+      var valid = true;
+      if (!zipFilename) { document.getElementById("filenameError").style.display = "block"; valid = false; }
+      if (!includeHeatmap && !includePDF && !includeAttachments) { document.getElementById("checkboxError").style.display = "block"; valid = false; }
+      if (!valid) return;
+
+      closePopUp("Show Exam Zip Options");
+      getExamAndHeatmapHTML(includePDF, includeHeatmap, function (examHTML, heatmapHTML) {
+        var fd = new FormData();
+        fd.append("examGUID", ExamID);
+        fd.append("xCID", xCID);
+        fd.append("zipFilename", zipFilename);
+        fd.append("heatmap", includeHeatmap.toString());
+        fd.append("pdf", includePDF.toString());
+        fd.append("attachments", includeAttachments.toString());
+        fd.append("examHTML", examHTML || "");
+        fd.append("heatmapHTML", heatmapHTML || "");
+        mbxExamDownload("zip", fd, zipFilename + ".zip");
+      });
     };
 
     // Workflow report PDF: download/send through this app's exam/{item}/workflow routes
