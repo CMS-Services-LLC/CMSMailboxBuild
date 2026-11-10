@@ -362,6 +362,9 @@ function viewMgtExam(ExamID, xcid, xcompany, snapshot) {
     main = document.getElementById("availExamsInner");
     if (MgtSnapshot) { main.classList.add("mgtSnapRO"); }
 
+    //code:20261110 Release Status bar: above the scrolling exam, so it stays in view wherever the exam is scrolled
+    if (!MgtSnapshot) { main.parentNode.insertBefore(dyn("div", "id=mgtReleaseBar|class=excludePrint|style=display:none"), main); }
+
     //code:20261027 hide the exam until it is fully built: main build + answers + scores + last view
     main.parentNode.insertBefore(dyn("div", "id=examLoadingMsg|style=padding:20px; font-weight:normal; color:black|innerHTML=Please wait while the exam is loading ..."), main);
     var examLoaded = mgtExamLoadBegin(4);
@@ -437,6 +440,7 @@ function viewMgtExam(ExamID, xcid, xcompany, snapshot) {
         ])
         //code:20261025 exam workflow link (added only if the server says this exam has one and the caller may see it)
         if (!MgtSnapshot) { loadWorkflowLink(ExamID, xcid); }
+        if (!MgtSnapshot) { mgtRefreshPending(); } //code:20261110 Release Status
 
         //BUILD BANNER AND TABLE
         nsection("availExamsInner", [
@@ -1401,7 +1405,7 @@ function MGTPopDocs() {
                         "|||label|class=redlink|onclick=delExamDoc(" + dr.FID + ",false," + docFIDRow + ")|x" +
                         "|||label|style=width:10px" +
                         "|||label|icon=" + icon + "|class=cursor|onclick=" + onclick + "|" + dr.Filename +
-                        "", //code:20261104 John: no Make private on document request rows (management documents keep it)
+                        mgtRelLbl(dr), //code:20261104 John: no Make private on document request rows (management documents keep it)
                         "div|id=docReq2_" + dr.FID + "|style=font-weight:bold; padding:left:10px; padding:5px|Loaded By: " + dr.LoadedByName + " with " + dr.LoadedByCompany + " on " + convertDT(dr.DTCreated),
                     ]);
                     mgtDocDescShow(subsect, dr); //code:20261104 a management document shared back under its request keeps its description
@@ -1435,7 +1439,7 @@ function MGTPopPrivateDocs() {
             sharedBox.style.cssText = "background-color:#f2f7fc; border-radius:4px; margin-bottom:8px"; //code:20261110 subtle tint for shared management documents
             sect.insertBefore(sharedBox, sect.firstChild);
             xsection(sharedBox, [
-                "div|class=docrequest shadowSection mgtSharedDocs|style=padding:5px; font-weight:bold|&#128275; Management documents shared with " + xcName, //code:20261110 unlocked padlock (Management only has the locked one)
+                "div|class=docrequest shadowSection mgtSharedDocs|style=padding:5px; font-weight:bold; background-color:#e6f0fa|&#128275; Management documents shared with " + xcName, //code:20261110 unlocked padlock (Management only has the locked one)
                 "div|id=docShared_" + ln.strLineID + "|class=mgtSharedDocs|style=padding:10px"
             ]);
             for (var i = 0; i < shared.length; i++) {
@@ -1444,7 +1448,7 @@ function MGTPopPrivateDocs() {
                 xsection(document.getElementById("docShared_" + ln.strLineID), [
                     "div|id=docReq_" + dr.FID +
                     ((MgtDocsMgtView) ? "|||label|class=redlink|onclick=delExamDoc(" + dr.FID + ",false," + dr.DocFID + ")|x|||label|style=width:10px" : "") +
-                    "|||label|icon=file-receiving.png|class=cursor|onclick=" + onclick + "|" + dr.Filename +
+                    "|||label|icon=file-receiving.png|class=cursor|onclick=" + onclick + "|" + dr.Filename + mgtRelLbl(dr) +
                     ((MgtDocsMgtView) ? "|||label|class=cursor mgtDocPrivToggle|style=color:steelblue; padding-left:15px; font-weight:normal|onclick=MgtToggleDocPrivate(" + dr.DocFID + ",1)|Make private" : ""),
                     "div|id=docReq2_" + dr.FID + "|style=font-weight:bold; padding:left:10px; padding:5px|Loaded By: " + dr.LoadedByName + " with " + dr.LoadedByCompany + " on " + convertDT(dr.DTCreated) + ", shared with " + xcName +
                     mgtDocDescLink(dr),
@@ -2108,7 +2112,7 @@ function MGTPopAnswers(passedLineID, passedQNum, onDone) {
                                     "icon.onmouseover=divAnswer_" + ansID + "_icon.setAttribute('style', '" + stOver + "')|" +
                                     "icon.onmouseout=divAnswer_" + ansID + "_icon.setAttribute('style', '" + stOut + "')|" +
                                     "id=divAnswer_" + ansID + "|style=padding-left:10px|" + ans + "|||" +
-                                    "div|id=divAnswer_" + ansID + "_AnsBy|style=background-color:" + ansColor + "; padding-left:10px; padding:5px|" + UpdAns + ansBy
+                                    "div|id=divAnswer_" + ansID + "_AnsBy|style=background-color:" + ansColor + "; padding-left:10px; padding:5px|" + UpdAns + ansBy + mgtRelTag(xjs)
                                 ]);
 
                                 document.getElementById("divAnswer_" + ansID).className = "padLeft10";
@@ -2171,7 +2175,7 @@ function MGTPopAnswers(passedLineID, passedQNum, onDone) {
                                             var cbFld = document.getElementById("cbanswer_" + strLineID + "_" + ix);
                                             if (cbFld.value == MGTAuditLayers[ii]["Name"]) {
                                                 fld.checked = true;
-                                                fldD.innerHTML = "Answered By: " + ansBy;
+                                                fldD.innerHTML = "Answered By: " + ansBy + mgtRelTag(xjs);
                                                 fldD.className = "padLeft10 pad5";
                                                 fldD.style.backgroundColor = ansColor;
                                             }
@@ -2187,7 +2191,7 @@ function MGTPopAnswers(passedLineID, passedQNum, onDone) {
                                                 "icon.onmouseover=divAnswer_" + ansID + "_icon.setAttribute('style', '" + stOver + "')|" +
                                                 "icon.onmouseout=divAnswer_" + ansID + "_icon.setAttribute('style', '" + stOut + "')|" +
                                                 "id=divAnswer_" + ansID + "|class=PadLeft10|" + ans + "|||" +
-                                                "div|id=divAnswer_" + ansID + "_AnsBy|class=padLeft10 pad5|" + UpdAns + ansBy
+                                                "div|id=divAnswer_" + ansID + "_AnsBy|class=padLeft10 pad5|" + UpdAns + ansBy + mgtRelTag(xjs)
                                             ]);
                                             document.getElementById("divAnswer_" + ansID).className = "padLeft10";
                                             document.getElementById("divAnswer_" + ansID + "_AnsBy").style.backgroundColor = ansColor;
@@ -4180,3 +4184,125 @@ function mgtWorkflowSend(ExamID, xCID, btn) {
             console.log("SendWorkflowPdf failed", ex);
         });
 }
+
+
+//******************************************************************************************************************************
+//code:20261110 Release Status (SharedSQLWithClaude/FEATURE_ExamReleaseStatus): every change a company makes to an exam
+//(answers, scores, documents, remediations) is saved unreleased - only that company sees it - until it clicks Release.
+//  _MgtGetExamPending      { examid, xcid } -> Answers, Scores, Docs, Total, Company (the caller's company's unreleased count)
+//  _MgtReleaseExamChanges  { examid, xcid } -> releases all of it
+//The bar (#mgtReleaseBar, built in viewMgtExam above the scrolling exam) shows while Total > 0. It is refreshed after the
+//exam loads and shortly after every write below (newFormData is wrapped, so no call site has to remember).
+var MgtPending = null;
+var MGT_REL_WRITES = ["_MgtUpdateAnswer", "_MgtUpdateAnswers", "_MgtArchiveAnswer", "_MgtUpdateLMC", "_SetExamDefaultScores",
+    "_MGTExamUploadDoc", "_MGTExamAttachCMSDoc", "_MgtDeleteFormDoc", "_MgtSetDocPrivate", "_MgtSetDocDescription"];
+
+(function () {
+    if (typeof newFormData !== "function" || newFormData._mgtRel) return;
+    var orig = newFormData;
+    newFormData = function (action) {
+        var r = orig.apply(this, arguments);
+        if (MGT_REL_WRITES.indexOf(action) > -1) mgtPendingSoon();
+        return r;
+    };
+    newFormData._mgtRel = true;
+})();
+
+(function () {
+    if (document.getElementById("mgtRelStyles")) return;
+    var st = document.createElement("style");
+    st.id = "mgtRelStyles";
+    st.textContent =
+        "#mgtReleaseBar{position:sticky;top:0;z-index:900;margin:6px 0;padding:8px 12px;background:#fff4e0;border:2px solid #e8912d;" +
+        "border-radius:6px;box-shadow:0 2px 6px rgba(0,0,0,.15);align-items:center;gap:14px;font-size:13px;color:#5a3300}" +
+        "#mgtReleaseBar .mgtRelMsg{flex:1 1 auto}" +
+        "#mgtReleaseBar button{flex:0 0 auto;background:#d9480f;color:#fff;border:0;border-radius:5px;padding:9px 22px;font-size:15px;" +
+        "font-weight:bold;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.3)}" +
+        "#mgtReleaseBar button:hover{background:#b83a0a}#mgtReleaseBar button:disabled{background:#aaa;cursor:default}" +
+        "mgt-unrel,.mgtRelTagLbl{display:inline-block;background:#fde2b8;color:#8a4b00;border-radius:3px;padding:0 6px;margin-left:8px;" +
+        "font-size:11px;font-weight:bold;vertical-align:middle}";
+    document.head.appendChild(st);
+})();
+
+//"Unreleased" tag for an answer row (HTML text: ndyn splits attribute text on "=", so a tag with no attributes)
+function mgtRelTag(row) {
+    return (row && row.Unreleased) ? " <mgt-unrel>Unreleased</mgt-unrel>" : "";
+}
+//"Unreleased" tag appended to a document row's ndyn string
+function mgtRelLbl(dr) {
+    return (dr && dr.Unreleased) ? "|||label|class=mgtRelTagLbl|title=Only your company sees this until you release your changes|Unreleased" : "";
+}
+
+var mgtPendingTimers = [];
+function mgtPendingSoon() {
+    mgtPendingTimers.forEach(function (t) { clearTimeout(t); });
+    mgtPendingTimers = [setTimeout(mgtRefreshPending, 1200), setTimeout(mgtRefreshPending, 4000)];
+}
+
+function mgtRefreshPending() {
+    if (MgtSnapshot || !MgtExamID || !document.getElementById("mgtReleaseBar")) return;
+    var examid = MgtExamID, xcid = MgtXCID;
+    getData(null, newFormData("_MgtGetExamPending", { examid: examid, xcid: xcid }), function (vr) {
+        if (examid != MgtExamID || xcid != MgtXCID) return;
+        try { MgtPending = jparse(vr)[0] || null; } catch (e) { MgtPending = null; }
+        mgtRenderReleaseBar();
+    });
+}
+
+function mgtRenderReleaseBar() {
+    var bar = document.getElementById("mgtReleaseBar");
+    if (!bar) return;
+    var p = MgtPending;
+    if (!p || !(p.Total > 0)) { bar.style.display = "none"; bar.innerHTML = ""; return; }
+
+    var parts = [];
+    if (p.Answers > 0) parts.push(p.Answers + " answer" + (p.Answers == 1 ? "" : "s"));
+    if (p.Scores > 0) parts.push(p.Scores + " score" + (p.Scores == 1 ? "" : "s"));
+    if (p.Docs > 0) parts.push(p.Docs + " document" + (p.Docs == 1 ? "" : "s"));
+    var who = String(p.Company || "your company");
+
+    bar.innerHTML = "";
+    var msg = document.createElement("div");
+    msg.className = "mgtRelMsg";
+    msg.innerHTML = "<b>&#9888; You have " + p.Total + " unreleased change" + (p.Total == 1 ? "" : "s") + "</b> (" + parts.join(", ") + "). " +
+        "They are saved, but only " + mgtRelEsc(who) + " can see them until you release them.";
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = "Release changes";
+    btn.onclick = function () { mgtReleaseChanges(btn); };
+    bar.appendChild(msg);
+    bar.appendChild(btn);
+    bar.style.display = "flex";
+}
+
+function mgtRelEsc(t) {
+    return String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function mgtReleaseChanges(btn) {
+    var p = MgtPending;
+    if (!p || !(p.Total > 0)) return;
+    if (!confirm("Release " + p.Total + " change" + (p.Total == 1 ? "" : "s") + " to this exam?\n\nEveryone who can see this exam will see them.")) return;
+    if (btn) { btn.disabled = true; btn.textContent = "Releasing ..."; }
+    var examid = MgtExamID, xcid = MgtXCID, xcompany = MgtXCompany;
+    getData(null, newFormData("_MgtReleaseExamChanges", { examid: examid, xcid: xcid }), function (vr) {
+        var r = null;
+        try { r = jparse(vr)[0]; } catch (e) { r = null; }
+        if (!r || r.err != null) {
+            alert("Your changes could not be released. Please try again.");
+            if (btn) { btn.disabled = false; btn.textContent = "Release changes"; }
+            return;
+        }
+        MgtPending = r;
+        //reload the exam so every "Unreleased" tag and the workflow reflect the release
+        viewMgtExam(examid, xcid, xcompany);
+    });
+}
+
+//leaving the page (or the Exams window / mailbox) with unreleased changes: the browser asks first
+window.addEventListener("beforeunload", function (e) {
+    if (MgtPending && MgtPending.Total > 0 && document.getElementById("mgtReleaseBar")) {
+        e.preventDefault();
+        e.returnValue = "";
+    }
+});

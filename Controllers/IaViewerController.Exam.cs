@@ -39,8 +39,8 @@ namespace CMSMailbox.Controllers
     //      by the caller's company; deletes must be the caller's own upload on that exam;
     //      CMS-file attaches are the caller's own cached files for the examined company;
     //   4. writes stop when CanWrite = 0 (Assignee: Completed; Assigner: Cancelled).
-    // The assignee's first answer or upload moves the task Open → Pending Review
-    // (MBX_MarkExamTaskStarted).
+    // The assignee's first Release (2026-11-10; was: first answer or upload) moves the task
+    // Open → Pending Review (MBX_MarkExamTaskStarted): until then management can't see any of it.
     public partial class IaViewerController
     {
         private static readonly HashSet<string> ExamReadActions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -62,14 +62,20 @@ namespace CMSMailbox.Controllers
             // Document request "+" > From CMS: the caller's own CMS files for the examined
             // company. Only while the task can still change, and the file cache is rebuilt
             // first (see ExamAdHoc).
-            "_MGTGetCMSFiles"
+            "_MGTGetCMSFiles",
+            // Release Status (CMS SharedSQLWithClaude/FEATURE_ExamReleaseStatus, 2026-11-10): what the
+            // caller's own company has unreleased on the task's exam (pinned below)
+            "_MgtGetExamPending"
         };
 
         // Content writes: require CanWrite; the assignee's mark the task started.
         private static readonly HashSet<string> ExamWriteActions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "_MgtUpdateAnswers", "_MgtUpdateAnswer", "_MgtArchiveAnswer", "_MgtDeleteFormDoc",
-            "_MGTExamAttachCMSDoc"
+            "_MGTExamAttachCMSDoc",
+            // Release: makes the caller's own company's unreleased changes on the task's exam visible
+            // (the proc only ever touches the caller's company's rows)
+            "_MgtReleaseExamChanges"
         };
 
         // Management view only (scoring): the Assigner role.
@@ -199,10 +205,12 @@ namespace CMSMailbox.Controllers
             foreach (var key in jo) strParams += ", @" + key.Key;
             var dat = DB.GetDB("exec NEO" + action + " @uid" + strParams, uid, jo.ToString(Formatting.None));
 
+            // Release Status: answers and documents are unreleased until the assignee releases them,
+            // so the task becomes Pending Review on its first release that released something.
             if (isWrite && !ctx.IsAssigner && !dat.Columns.Contains("err") &&
-                (string.Equals(action, "_MgtUpdateAnswers", StringComparison.OrdinalIgnoreCase) ||
-                 string.Equals(action, "_MgtUpdateAnswer", StringComparison.OrdinalIgnoreCase) ||
-                 string.Equals(action, "_MGTExamAttachCMSDoc", StringComparison.OrdinalIgnoreCase)))
+                string.Equals(action, "_MgtReleaseExamChanges", StringComparison.OrdinalIgnoreCase) &&
+                dat.Rows.Count > 0 && dat.Columns.Contains("ReleasedAnswers") &&
+                (Convert.ToInt32(dat.Rows[0]["ReleasedAnswers"]) + Convert.ToInt32(dat.Rows[0]["ReleasedDocs"])) > 0)
             {
                 MarkExamStarted(ctx.OriginItemID, uid);
             }
@@ -253,7 +261,7 @@ namespace CMSMailbox.Controllers
                 rtn = JsonConvert.SerializeObject(RunAttachSql(action, file.FileName, filedata, jo, uid));
             }
 
-            if (Request.Form.Files.Count > 0 && !ctx.IsAssigner) MarkExamStarted(ctx.OriginItemID, uid);
+            // (uploads are unreleased now: the task is marked started on Release, see ExamAdHoc)
             LogAccess(messageItemId, uid, "Served", "exam: " + Request.Form.Files.Count + " document(s) uploaded");
             return Content(rtn, "application/json");
         }
@@ -277,7 +285,9 @@ namespace CMSMailbox.Controllers
                 "case when d.LinkedFID is not null then fd.FileData else d.Filedata end as FileData " +
                 "from a_aMGTExamDocs d left join files f on f.fid = d.LinkedFID " +
                 "left join FileData fd on fd.fid = f.fid and fd.isDispute = 0 " +
-                "where d.FID = @fid and d.ExamID = @examid and d.xCID = @xcid and d.Active = 1 " +
+                "where d.FID = @fid and d.ExamID = @examid and d.xCID = @xcid " +
+                // released, or the caller's own company's unreleased upload (Release Status, 2026-11-10)
+                "and (d.Active = 1 or (d.Active = 0 and d.PendingCID = dbo.mycid(@uid))) " +
                 // management-only documents (CMS sql FEATURE_ExamPrivateDocs pmd_001) are never served here
                 "and d.IsPrivate = 0", uid,
                 new JObject { ["fid"] = fid, ["examid"] = ctx.ExamID, ["xcid"] = ctx.ExamCID }.ToString());
@@ -342,7 +352,9 @@ namespace CMSMailbox.Controllers
                 // viewer uses to show Edit at all.
                 var ok = DB.GetDB(
                     "select top 1 1 as x from a_aMgtExamAnswers a " +
-                    "where a.AnswerID = @answerid and a.xCID = @xcid and a.Active = 1 " +
+                    "where a.AnswerID = @answerid and a.xCID = @xcid " +
+                    // released, or the caller's own company's unreleased row (Release Status)
+                    "and (a.Active = 1 or (a.Active = 0 and a.PendingCID = dbo.mycid(@uid))) " +
                     "and dbo.mycid(a.uid) = dbo.mycid(@uid) " +
                     "and a.ElemID in (" +
                     "  select le.ElemID from a_aMgtExamLineElems le join a_aMgtExamBody b on b.LineID = le.LineID and b.ExamID = @examid and b.Active = 1 " +
@@ -354,7 +366,8 @@ namespace CMSMailbox.Controllers
             if (string.Equals(action, "_MgtDeleteFormDoc", StringComparison.OrdinalIgnoreCase))
             {
                 var ok = DB.GetDB(
-                    "select top 1 1 as x from a_aMGTExamDocs where FID = @fid and ExamID = @examid and xCID = @xcid and UID = @uid and Active = 1",
+                    "select top 1 1 as x from a_aMGTExamDocs where FID = @fid and ExamID = @examid and xCID = @xcid and UID = @uid " +
+                    "and (Active = 1 or PendingCID = dbo.mycid(@uid))",	// or my unreleased upload (Release Status)
                     uid, new JObject { ["fid"] = Math.Abs(int.TryParse(Val("fid"), out var f) ? f : 0), ["examid"] = ctx.ExamID, ["xcid"] = ctx.ExamCID }.ToString());
                 return ok.Rows.Count > 0 && !ok.Columns.Contains("err") ? null : "document is not your upload on this exam";
             }
