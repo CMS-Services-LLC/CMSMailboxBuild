@@ -64,7 +64,8 @@ namespace CMSMailbox.Controllers
         // is dead code — triggeredID is hard-wired to null).
         private static readonly HashSet<string> PinnedToItemRecord = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "_IAGetHistory", "_IAGetJoinRecord", "_IAGetMultiAnswers", "_IAGetSetAprovalBy"
+            "_IAGetHistory", "_IAGetJoinRecord", "_IAGetMultiAnswers", "_IAGetSetAprovalBy",
+            "_IAApproveDecline"
         };
 
         // Write actions — unblocked 2026-09-22 once every one of these procs' own
@@ -82,7 +83,11 @@ namespace CMSMailbox.Controllers
         private static readonly HashSet<string> WriteActions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "_IASubmitDataByGen300_2", "_IALockRecord", "_IADelFileNote",
-            "_IAAcceptAddtlInfo", "_IAGetSetSystemLinks", "_IADocAssign", "_IALoadNotes"
+            "_IAAcceptAddtlInfo", "_IAGetSetSystemLinks", "_IADocAssign", "_IALoadNotes",
+            // Approve / Decline (2026-11-10). NEO_IAApproveDecline checks nothing about
+            // the caller, so it is pinned to this item's record and AdHoc also requires
+            // the caller's company to be the record's approving company.
+            "_IAApproveDecline"
         };
 
         // New-record mode (a FormApplication task, sql/006): the item's ItemID is still
@@ -111,6 +116,13 @@ namespace CMSMailbox.Controllers
             // message instead of a viewer that fails to render.
             if (IsUnreleasedForOtherCompany(messageItemId, uid))
                 return StatusCode(403, new { reason = "unreleased" });
+
+            // A FormApplication task the assignee hasn't started (ItemID still "0"):
+            // only the assignee can open the blank form, so anyone else who can see
+            // the item (its sender, sql/033) gets a clear message instead of
+            // "no longer have access" (2026-11-10).
+            if (IsNotYetCreatedForCaller(messageItemId, uid))
+                return StatusCode(403, new { reason = "notcreated" });
 
             var ctx = ResolveAndGateByMessageItem(messageItemId, uid);
             if (ctx == null) return NotFound();
@@ -235,6 +247,19 @@ namespace CMSMailbox.Controllers
                 }
             }
 
+            // Approve / Decline: only the company the record is waiting on — the same
+            // ApprovalCID ViewDispGO checks before it shows the button, read here from
+            // NEO_IAGetSetAprovalBy for this item's own record — and only ad 0 or 1.
+            if (string.Equals(action, "_IAApproveDecline", StringComparison.OrdinalIgnoreCase))
+            {
+                string why = ApproveDeclineRefusal(jo, ctx, uid);
+                if (why != null)
+                {
+                    LogAccess(messageItemId, uid, "Denied", "_IAApproveDecline: " + why);
+                    return Content("[]");
+                }
+            }
+
             string strParams = "";
             foreach (var key in jo) strParams += ", @" + key.Key;
 
@@ -275,6 +300,27 @@ namespace CMSMailbox.Controllers
             }
 
             return Content(JsonConvert.SerializeObject(dat), "application/json");
+        }
+
+        // Returns null if this approve/decline is allowed, else the reason. Only the
+        // keys the proc takes are let through (mainid is already pinned by AdHoc).
+        private static string ApproveDeclineRefusal(JObject jo, ItemContext ctx, int uid)
+        {
+            var allowedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "mainid", "ad", "definition" };
+            if (jo.Properties().Any(p => !allowedKeys.Contains(p.Name))) return "unexpected parameter";
+            string ad = jo.Properties().FirstOrDefault(p => string.Equals(p.Name, "ad", StringComparison.OrdinalIgnoreCase))?.Value?.ToString();
+            if (ad != "0" && ad != "1") return "ad must be 0 or 1";
+
+            var ap = DB.GetDB("exec NEO_IAGetSetAprovalBy @uid, @formid, @fieldname, @MainID", uid,
+                "{\"formid\":\"" + ctx.FormId + "\",\"fieldname\":\"\",\"MainID\":" + ctx.MainId + "}");
+            if (ap.Columns.Contains("err") || !ap.Columns.Contains("ApprovalCID")) return "approval company lookup failed";
+
+            var me = DB.GetDB("select dbo.mycid(@uid) as CID", uid);
+            if (me.Rows.Count == 0 || me.Columns.Contains("err")) return "caller company lookup failed";
+            string myCid = me.Rows[0]["CID"]?.ToString() ?? "";
+
+            bool isApprover = myCid != "" && ap.Rows.Cast<DataRow>().Any(r => r["ApprovalCID"] != DBNull.Value && r["ApprovalCID"].ToString() == myCid);
+            return isApprover ? null : "caller's company is not the record's approving company";
         }
 
         // Returns null if this new-record-mode call is allowed, else the reason. The
@@ -681,6 +727,23 @@ namespace CMSMailbox.Controllers
                 uid, "{\"messageItemId\":" + messageItemId + "}");
 
             return dat.Rows.Count > 0 && !dat.Columns.Contains("err");
+        }
+
+        // True when this user can see this IAFormRecord item, it has no record yet
+        // (ItemID "0"), and they have no open task on it, so ResolveNewRecordTask
+        // would refuse them. Only refuses; it never grants anything.
+        private static bool IsNotYetCreatedForCaller(int messageItemId, int uid)
+        {
+            var dat = DB.GetDB(
+                "select top 1 1 as x from MBX_MessageItem mi " +
+                "where mi.MessageItemID = @messageItemId and mi.ItemType = 'IAFormRecord' and mi.ItemID = '0' " +
+                "and dbo.MBX_CanOpenItem(mi.MessageItemID, @uid) = 1",
+                uid, "{\"messageItemId\":" + messageItemId + "}");
+            if (dat.Rows.Count == 0 || dat.Columns.Contains("err")) return false;
+
+            var task = DB.GetDB("exec MBX_GetOpenFormTask @uid, @messageItemId", uid,
+                "{\"messageItemId\":" + messageItemId + "}");
+            return !task.Columns.Contains("err") && task.Rows.Count == 0;
         }
 
         // Gate A: this user's own Team grant covers this FormID (NEO_NewSecurity

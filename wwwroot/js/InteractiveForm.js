@@ -2031,22 +2031,58 @@ function SetApprovalStatus(main, mainid, go, AD, gobaby) {
         var ix = main.id.split("_")[1];
         document.getElementById("btnPopUpClose_" + ix).innerHTML = "Cancel";
 
+        // CMSMailbox adaptation (2026-11-10): Approve and Decline side by side, so
+        // both fit the 150px popup without scrolling (CMS stacks them).
         xsection(main, [
             "br",
-            "button|class=blueButton|onclick=SetApprovalStatus(null, " + mainid + ", true, 0)|Approve",
-            "br", "br", "br",
-            "button|class=blueButton|onclick=SetApprovalStatus(null, " + mainid + ", true, 1)|Decline"
+            "div|style=display:flex; gap:16px; justify-content:center" +
+                "|||button|class=blueButton|style=margin:0; float:none|onclick=SetApprovalStatus(null, " + mainid + ", true, 0)|Approve" +
+                "|||button|class=blueButton|style=margin:0; float:none|onclick=SetApprovalStatus(null, " + mainid + ", true, 1)|Decline"
         ]);
     } else if (!gobaby) {
-        xconfirm("Are you sure you want to " + ((AD == 0) ? "Approve" : "Decline") + " this record?",
-            null,
-            "SetApprovalStatus(null, " + mainid + ", true, " + AD + ", true)");
+        if (AD == 0) {
+            xconfirm("Are you sure you want to Approve this record?",
+                null,
+                "SetApprovalStatus(null, " + mainid + ", true, " + AD + ", true)");
+        } else {
+            //code:20261020:jk:decline requires a status definition (ported from CMS 2026-11-10)
+            xconfirm(null, [
+                "div|Are you sure you want to Decline this record?",
+                "br",
+                "div|Why is this record being declined? (required)",
+                "textarea|id=txtStatusDefinition|style=resize:none; width:100%; height:200px"
+            ], "SetApprovalStatus(null, " + mainid + ", true, " + AD + ", true)");
+        }
     } else {
+        var definition = "";
+        if (AD == 1) {
+            definition = txtStatusDefinition.value.trim();
+            if (definition == "") {
+                txtStatusDefinition.style.border = "1px solid red";
+                txtStatusDefinition.focus();
+                return;
+            }
+        }
         //alert("_IAApproveDecline mainid: " + mainid + ", ad: " + AD );
-        getData(null, newFormData("_IAApproveDecline", { mainid: mainid, ad: AD }), function(vr) {
+        getData(null, newFormData("_IAApproveDecline", { mainid: mainid, ad: AD, definition: definition }), function(vr) {
             console.log("approvalBy", "_IAApproveDecline", { mainid: mainid, ad: AD }, vr);
             xconfirm();
             closePopUp("Set Approval Status");
+            // CMSMailbox adaptation (2026-11-10): CMS's GetMain() report refresh needs
+            // page elements this viewer doesn't have, and SendEmailAlert's
+            // _GetEmailAlert isn't on IaViewerController's allowlist. The server
+            // answers "[]" when it refuses (not the approving company); the proc
+            // returns the record's new Status row when it ran.
+            if (typeof mbxRecordSaved === "function") {
+                var ok = false;
+                try { var rows = jparse(vr); ok = rows.length > 0 && rows[0].err == null; } catch (e) { ok = false; }
+                if (!ok) {
+                    xconfirm("This record could not be " + ((AD == 0) ? "approved" : "declined") + ". Your company may not be the one this approval is waiting on.");
+                    return;
+                }
+                mbxRecordSaved(1, "Record " + ((AD == 0) ? "approved" : "declined"));
+                return;
+            }
             GetMain(mainid);
             SendEmailAlert("Form Applications", mainid.toString());
         });
@@ -4213,8 +4249,10 @@ function SubmitRecord(mainid, released) {
                         // so the re-open shows it as a normal record. CMS's release
                         // alert (SendEmailAlert) isn't sent from here: its
                         // _GetEmailAlert isn't on IaViewerController's allowlist.
+                        // `released` tells Save for Use (closes the record) apart
+                        // from Save & Review (record stays open, 2026-11-10).
                         if (typeof mbxRecordSaved === "function") {
-                            mbxRecordSaved();
+                            mbxRecordSaved(released);
                             return;
                         }
 

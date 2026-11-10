@@ -171,11 +171,15 @@
       }, true);
     });
 
-    function mbxRecordSaved() {
+    // `released` is SubmitRecord's: 1 for Save for Use (and Save on an
+    // already-released record), falsy for Save & Review. index.html closes the
+    // record only on the first; Save & Review re-opens it in place (2026-11-10).
+    // `notice` (optional) replaces the mailbox's "Record saved" (Approve/Decline).
+    function mbxRecordSaved(released, notice) {
       mbxOriginals.clear();
       document.body.classList.remove("mbxDirty");
       if (window.parent && window.parent !== window) {
-        window.parent.postMessage({ mbxRecordSaved: true }, window.location.origin);
+        window.parent.postMessage({ mbxRecordSaved: true, released: released == 1, notice: notice || "" }, window.location.origin);
       } else {
         window.location.reload();
       }
@@ -213,9 +217,11 @@
           // IaViewerController.Bootstrap: the record exists but hasn't been
           // released yet, so only the company that created it can open it.
           return r.json().then(function (res) {
-            if (res && res.reason === "unreleased") {
+            // ... or (reason "notcreated") it's a form task the assignee hasn't
+            // started yet, so there is no record to show the sender.
+            if (res && (res.reason === "unreleased" || res.reason === "notcreated")) {
               document.getElementById("mbxDeniedBanner").textContent =
-                "This record has not yet been saved for use.";
+                "This record has either not yet been created or has not been saved for use.";
             }
             throw new Error("bootstrap refused: " + (res && res.reason));
           });

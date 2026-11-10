@@ -2370,6 +2370,20 @@
                 });
             } catch (e) { return false; }
         }
+        // Save & Review: reload the open record in its fullscreen frame. The frame's
+        // load listener (mbxOpenItem) re-mirrors its save buttons; the old copies'
+        // clicks point at the old document, so drop them first.
+        function mbxReloadOpenRecord(frame) {
+            mbxStopSaving();
+            if (mbxSaveObserver) { mbxSaveObserver.disconnect(); mbxSaveObserver = null; }
+            var saves = document.getElementById("mbxFullscreenSaves");
+            saves.innerHTML = "";
+            saves.removeAttribute("data-sig");
+            document.getElementById("mbxFullscreenUnsaved").style.display = "none";
+            document.getElementById("mbxCloseBtn").textContent = "Close";
+            try { frame.contentWindow.location.reload(); } catch (e) { frame.src = frame.src; }
+        }
+
         function mbxShowSavedNotice(text) {
             var n = document.getElementById("mbxSavedNotice");
             n.textContent = text;
@@ -2381,13 +2395,20 @@
         window.addEventListener("message", function (event) {
             if (event.origin !== window.location.origin) return;
             if (event.data && event.data.mbxActivity) { resetIdle(); return; }
-            // ia-viewer.html's mbxRecordSaved(): a record was just saved. Close it
-            // (back to its summary line) and refresh the task lines and that line's
-            // record ID — not the whole message.
+            // ia-viewer.html's mbxRecordSaved(): a record was just saved. Save for
+            // Use closes it (back to its summary line); Save & Review re-opens it in
+            // place so the user stays on it until they Save for Use or Close
+            // (2026-11-10). Either way refresh the task lines and that line's record
+            // ID — not the whole message.
             if (event.data && event.data.mbxRecordSaved) {
                 if (mbxFullscreenFrame && mbxFullscreenFrame.contentWindow === event.source) {
-                    mbxClearFullscreen();
-                    mbxShowSavedNotice("Record saved");
+                    if (event.data.released) {
+                        mbxClearFullscreen();
+                        mbxShowSavedNotice(event.data.notice || "Record saved");
+                    } else {
+                        mbxReloadOpenRecord(mbxFullscreenFrame);
+                        mbxShowSavedNotice("Record saved. It stays open for review until you Save for Use or Close.");
+                    }
                 }
                 refreshTaskCards();
                 return;
