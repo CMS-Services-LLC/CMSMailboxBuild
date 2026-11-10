@@ -1435,7 +1435,7 @@ function MGTPopPrivateDocs() {
             sharedBox.style.cssText = "background-color:#f2f7fc; border-radius:4px; margin-bottom:8px"; //code:20261110 subtle tint for shared management documents
             sect.insertBefore(sharedBox, sect.firstChild);
             xsection(sharedBox, [
-                "div|class=docrequest shadowSection mgtSharedDocs|style=padding:5px; font-weight:bold|Management documents shared with " + xcName,
+                "div|class=docrequest shadowSection mgtSharedDocs|style=padding:5px; font-weight:bold|&#128275; Management documents shared with " + xcName, //code:20261110 unlocked padlock (Management only has the locked one)
                 "div|id=docShared_" + ln.strLineID + "|class=mgtSharedDocs|style=padding:10px"
             ]);
             for (var i = 0; i < shared.length; i++) {
