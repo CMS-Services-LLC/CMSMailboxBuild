@@ -241,6 +241,23 @@ namespace CMSMailbox.Controllers
             string sql = "exec NEO" + action + " @uid" + strParams;
             var dat = DB.GetDB(sql, uid, strjson ?? "");
 
+            // _IAGetFormData is NEO_IAGetFormData itself, so it can land in the same ACS
+            // delete/re-insert gap as Gate B (see GateFailure): retry a miss briefly too.
+            if (!ctx.IsNewRecord && string.Equals(action, "_IAGetFormData", StringComparison.OrdinalIgnoreCase))
+            {
+                for (int i = 0; i < GateRetryDelaysMs.Length && (dat.Rows.Count == 0 || dat.Columns.Contains("err")); i++)
+                {
+                    System.Threading.Thread.Sleep(GateRetryDelaysMs[i]);
+                    dat = DB.GetDB(sql, uid, strjson ?? "");
+                }
+                if (dat.Rows.Count == 0 || dat.Columns.Contains("err"))
+                {
+                    LogAccess(messageItemId, uid, "Error", "_IAGetFormData: " +
+                        (dat.Columns.Contains("err") && dat.Rows.Count > 0 ? ShortErr(dat.Rows[0]["err"]) : "no rows") + " (after retries)");
+                    return Content("[]");
+                }
+            }
+
             LogAccess(messageItemId, uid, "Served", action);
 
             // First save of a new-record task: the proc created the record and returned
@@ -538,9 +555,10 @@ namespace CMSMailbox.Controllers
                 return null;
             }
 
-            if (!PassesGates(uid, mainId, formId))
+            string gateWhy = GateFailure(uid, mainId, formId);
+            if (gateWhy != null)
             {
-                LogAccess(messageItemId, uid, "Denied", "failed Gate A/Gate B");
+                LogAccess(messageItemId, uid, "Denied", "failed Gate A/Gate B: " + gateWhy);
                 return null;
             }
 
@@ -592,14 +610,57 @@ namespace CMSMailbox.Controllers
             return lookup.Rows[0]["FormID"]?.ToString();
         }
 
-        private bool PassesGates(int uid, int mainId, string formId)
+        private bool PassesGates(int uid, int mainId, string formId) => GateFailure(uid, mainId, formId) == null;
+
+        // 2026-11-09 (PROD item 15 opened blank): NEO_IAGetFormData is not read-only. It runs
+        // NEO_IAUpdateRecordACS, which DELETES this record's NEO_IAFormRecordACS rows and then
+        // re-inserts them (no transaction). The viewer fires its data calls at once and every one
+        // re-runs Gate B, so a call landing in that gap sees no rows (or loses a deadlock) and was
+        // denied, while the calls a moment later passed. So a Gate B miss is retried briefly before
+        // it counts. A missing Team grant (Gate A) is a real answer and isn't retried.
+        private static readonly int[] GateRetryDelaysMs = { 250, 700 };
+
+        // null = passes; otherwise the reason, for MBX_AccessLog.
+        private string GateFailure(int uid, int mainId, string formId)
         {
-            if (!PassesGateA(uid, formId)) return false;
+            for (int attempt = 0; ; attempt++)
+            {
+                string why = GateFailureOnce(uid, mainId, formId, out bool retryable);
+                if (why == null)
+                {
+                    if (attempt > 0) _logger.LogInformation("IA gate passed on retry {Attempt} (uid {Uid}, MainID {MainId})", attempt, uid, mainId);
+                    return null;
+                }
+                if (!retryable || attempt >= GateRetryDelaysMs.Length)
+                    return why + (attempt > 0 ? " (after " + (attempt + 1) + " tries)" : "");
+                System.Threading.Thread.Sleep(GateRetryDelaysMs[attempt]);
+            }
+        }
+
+        private string GateFailureOnce(int uid, int mainId, string formId, out bool retryable)
+        {
+            retryable = false;
+            var security = DB.GetDB("exec NEO_NewSecurity @uid", uid);
+            if (security.Columns.Contains("err"))
+            {
+                retryable = true;
+                return "Gate A error: " + ShortErr(security.Rows[0]["err"]);
+            }
+            if (!GrantsForm(security, formId)) return "Gate A: no Team grant for this form";
 
             var formData = DB.GetDB("exec NEO_IAGetFormData @uid, @MainID, @FormID", uid,
                 "{\"MainID\":" + mainId + ",\"FormID\":\"" + formId + "\"}");
+            retryable = true;
+            if (formData.Columns.Contains("err")) return "Gate B error: " + ShortErr(formData.Rows[0]["err"]);
+            if (formData.Rows.Count == 0) return "Gate B: NEO_IAGetFormData returned no rows";
+            return null;
+        }
 
-            return formData.Rows.Count > 0 && !formData.Columns.Contains("err");
+        // First line of a SQL error, short enough for MBX_AccessLog.DetailMsg (nvarchar 500).
+        private static string ShortErr(object err)
+        {
+            var s = (err?.ToString() ?? "").Split('\n')[0].Trim();
+            return s.Length > 300 ? s.Substring(0, 300) : s;
         }
 
         // True when this user is a recipient of this IAFormRecord item, the record is
@@ -628,7 +689,13 @@ namespace CMSMailbox.Controllers
         {
             if (string.IsNullOrEmpty(formId)) return false;
 
-            var security = DB.GetDB("exec NEO_NewSecurity @uid", uid);
+            return GrantsForm(DB.GetDB("exec NEO_NewSecurity @uid", uid), formId);
+        }
+
+        // NEO_NewSecurity returns one row per FormID this user's Team grants cover.
+        private static bool GrantsForm(DataTable security, string formId)
+        {
+            if (string.IsNullOrEmpty(formId)) return false;
             return security.Columns.Contains("FormID") &&
                 security.Rows.Cast<DataRow>().Any(r => r["FormID"] != DBNull.Value && r["FormID"].ToString() == formId);
         }

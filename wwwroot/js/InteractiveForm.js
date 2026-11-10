@@ -1910,6 +1910,7 @@ function tableLineSelect(MainID) {
 
 var jsInnerFormData = [];
 
+var mbxViewDispRetries = {};   // CMSMailbox adaptation: automatic retries per MainID (see ViewDisp)
 function ViewDisp(MainID, FormID, clone, sentfunc) {
     MainID = (!MainID) ? 0 : (MainID == -1) ? 0 : MainID;
     xtFilterState = null; closeDropMenu();
@@ -1954,6 +1955,32 @@ function ViewDisp(MainID, FormID, clone, sentfunc) {
             var jsMultiAnswers = js[3];
             var jsBlanks = js[4];
             var joSetApprovalBy = js[5][0];
+
+            // CMSMailbox adaptation (2026-11-09): the mailbox returns [] when it can't load the
+            // record (a refusal, or a momentary miss while CMS rebuilds the record's access rows).
+            // This used to throw on jsSingle[0] and leave a blank page. Retry once on its own,
+            // then say so with a Retry button. Keep this patch when re-copying from CMS.
+            if (!jsSingle || !jsSingle[0]) {
+                mbxViewDispRetries[MainID] = (mbxViewDispRetries[MainID] || 0) + 1;
+                if (mbxViewDispRetries[MainID] == 1) {
+                    dispMain.innerHTML = "<div style='padding:20px;color:#555'>Loading the record...</div>";
+                    setTimeout(function () { ViewDisp(MainID, FormID, clone, sentfunc); }, 1000);
+                    return;
+                }
+                mbxViewDispRetries[MainID] = 0;
+                dispMain.innerHTML = "";
+                var box = document.createElement("div");
+                box.style.cssText = "padding:20px;color:#333";
+                box.innerHTML = "<p style='margin:0 0 10px 0'>This record couldn't be loaded. Please try again.</p>";
+                var retryBtn = document.createElement("button");
+                retryBtn.className = "blueButton";
+                retryBtn.textContent = "Retry";
+                retryBtn.onclick = function () { ViewDisp(MainID, FormID, clone, sentfunc); };
+                box.appendChild(retryBtn);
+                dispMain.appendChild(box);
+                return;
+            }
+            mbxViewDispRetries[MainID] = 0;
 
             jsSingle[0].ApprovalBy = joSetApprovalBy;
 
