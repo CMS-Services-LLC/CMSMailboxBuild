@@ -1428,7 +1428,13 @@ function MGTPopPrivateDocs() {
 
         var shared = jsMgtDocs.filter(d => d.LineID == ln.LineID && d.IsPrivate == 0 && d.DocReqID == "" && d.Document_Request == null && d.FID != null);
         if (shared.length > 0) {
-            xsection(sect, [
+            //code:20261110 John: shared management documents also go above the document requests
+            //(below the Management only box, which is inserted at the top after this)
+            var sharedBox = document.createElement("div");
+            sharedBox.className = "mgtSharedDocsBox";
+            sharedBox.style.cssText = "background-color:#f2f7fc; border-radius:4px; margin-bottom:8px"; //code:20261110 subtle tint for shared management documents
+            sect.insertBefore(sharedBox, sect.firstChild);
+            xsection(sharedBox, [
                 "div|class=docrequest shadowSection mgtSharedDocs|style=padding:5px; font-weight:bold|Management documents shared with " + xcName,
                 "div|id=docShared_" + ln.strLineID + "|class=mgtSharedDocs|style=padding:10px"
             ]);
@@ -1449,7 +1455,12 @@ function MGTPopPrivateDocs() {
 
         if (!MgtDocsMgtView) continue;
 
-        xsection(sect, [
+        //code:20261110 John: the Management only box goes above the question's document requests
+        var privBox = document.createElement("div");
+        privBox.className = "mgtPrivateDocs";
+        privBox.style.cssText = "background-color:#fffcf2; border-radius:4px; margin-bottom:8px"; //code:20261110 subtle tint for management only documents
+        sect.insertBefore(privBox, sect.firstChild);
+        xsection(privBox, [
             "div|class=docrequest shadowSection mgtPrivateDocs|style=padding:5px; font-weight:bold; background-color:#fff8e1|&#128274; Management only (not visible to the examined company)" +
             "|||button|class=longblueButton pad10 plusBtn|style=float:right|onclick=MGTUploadDocs(" + MgtXCID + ",'" + ln.ExamID + "','" + ln.LineID + "',null,null,1)|+",
             "div|id=docPriv_" + ln.strLineID + "|class=mgtPrivateDocs|style=padding:10px"
