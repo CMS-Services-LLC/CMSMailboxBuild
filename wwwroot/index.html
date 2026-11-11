@@ -51,15 +51,13 @@
         #folderTabs button.active { color: #2c6bd6; border-bottom-color: #2c6bd6; font-weight: bold; }
         #folderTabs button#refreshBtn { flex: 0 0 auto; padding: 10px 12px; font-size: 16px; color: #2c6bd6; }
         #folderTabs button#refreshBtn:disabled { color: #aaa; cursor: default; }
-        /* 2026-11-11: collapse / expand the message list (toggleListPane). Collapsed it is a 36px strip with
-           only the expand button, and the message pane gets the room. Remembered per browser. */
-        #listPane { transition: width .15s ease; }
-        #folderTabs button#listToggle { flex: 0 0 auto; padding: 10px 10px; font-size: 16px; color: #2c6bd6; }
-        #layout.listCollapsed #listPane { width: 36px; overflow: hidden; }
-        #layout.listCollapsed #listPane > :not(#folderTabs) { display: none; }
-        #layout.listCollapsed #folderTabs { border-bottom: 0; }
-        #layout.listCollapsed #folderTabs > :not(#listToggle) { display: none; }
-        #layout.listCollapsed #folderTabs button#listToggle { width: 36px; padding: 10px 0; }
+        /* 2026-11-11: collapse / expand the message list (toggleListPane) with the thin bar between the list
+           and the message (#listDivider, a small arrow in its middle). Collapsed, the list is hidden and the
+           message gets the room. Remembered per browser. */
+        #listDivider { flex: 0 0 10px; display: flex; align-items: center; justify-content: center; cursor: pointer;
+            background: #eef1f6; border-right: 1px solid #ddd; color: #6b7a90; font-size: 12px; user-select: none; }
+        #listDivider:hover { background: #dbe4f1; color: #2c6bd6; }
+        #layout.listCollapsed #listPane { display: none; }
         .listLoading { padding: 18px 14px; color: #777; font-size: 13px; display: flex; align-items: center; gap: 8px; }
         #inboxList { flex: 1; min-height: 0; overflow-y: auto; }
         #searchBox { flex-shrink: 0; padding: 8px 10px; border-bottom: 1px solid #ddd; display: flex; gap: 6px; align-items: center; }
@@ -257,7 +255,6 @@
         <div id="layout">
             <div id="listPane">
                 <div id="folderTabs">
-                    <button id="listToggle" title="Collapse the message list" onclick="toggleListPane()">&laquo;</button>
                     <button id="tab_inbox" class="active" onclick="setFolder('inbox')">Inbox</button>
                     <button id="tab_sent" onclick="setFolder('sent')">Sent</button>
                     <button id="tab_archived" onclick="setFolder('archived')">Archived</button>
@@ -281,6 +278,7 @@
                 </div>
                 <div id="inboxList"></div>
             </div>
+            <div id="listDivider" title="Collapse the message list" onclick="toggleListPane()">&#9664;</div>
             <div id="messagePane"><p class="hint" style="padding:10px">Select a message.</p></div>
         </div>
     </div>
@@ -418,9 +416,9 @@
             var layout = document.getElementById("layout");
             if (typeof collapse !== "boolean") collapse = !layout.classList.contains("listCollapsed");
             layout.classList.toggle("listCollapsed", collapse);
-            var btn = document.getElementById("listToggle");
-            btn.innerHTML = collapse ? "&raquo;" : "&laquo;";
-            btn.title = collapse ? "Expand the message list" : "Collapse the message list";
+            var bar = document.getElementById("listDivider");
+            bar.innerHTML = collapse ? "&#9654;" : "&#9664;";
+            bar.title = collapse ? "Expand the message list" : "Collapse the message list";
             try { localStorage.setItem("mbxListCollapsed", collapse ? "1" : "0"); } catch (e) { }
         }
         document.addEventListener("DOMContentLoaded", function () {
