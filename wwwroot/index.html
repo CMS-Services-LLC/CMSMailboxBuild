@@ -1340,7 +1340,8 @@
             var formNotCreated = item.ItemType === "IAFormRecord" && !isSavedForm && !notReleased && item.TaskID &&
                 item.TaskType === "FormApplication" && item.TaskStatus !== "Cancelled";
             var html = taskBanner(item, formNotCreated) + originBannerHtml(item) +
-                (isExam ? examFrameHtml(item, true) : isSavedForm ? formLineHtml(item) : isOpenableReport(item) ? "" : "<strong>" + escapeHtml(item.ItemLabel || item.ItemType) + "</strong>");
+                // notReleased: fillRecordState draws the name (once) with or without Open
+                (isExam ? examFrameHtml(item, true) : isSavedForm ? formLineHtml(item) : (isOpenableReport(item) || notReleased) ? "" : "<strong>" + escapeHtml(item.ItemLabel || item.ItemType) + "</strong>");
             if (formNotCreated) {
                 html += "<p class='hint'>This record has not been created yet. It will open here once the assignee saves it.</p>";
             } else if (notReleased) {
@@ -1364,7 +1365,8 @@
         // it anyway (their company owns the record). Open is offered only when it will work.
         function fillRecordState(item) {
             var id = item.MessageItemID;
-            var notYet = "<p class='hint'>The assignee has saved this record but hasn't clicked Save for Use yet. It will open here once they do.</p>";
+            var notYet = "<strong>" + escapeHtml(item.ItemLabel || item.ItemType) + "</strong>" +
+                "<p class='hint'>The assignee has saved this record but hasn't clicked Save for Use yet. It will open here once they do.</p>";
             api("/item/" + id + "/record-state")
                 .then(function (r) { return r.ok ? r.json() : null; })
                 .catch(function () { return null; })
@@ -1372,9 +1374,8 @@
                     var el = document.getElementById("relState_" + id);
                     if (!el) return;
                     if (s && s.released) el.innerHTML = formLineHtml(item);
-                    else if (s && s.canOpen) el.innerHTML =
-                        "<p class='hint'>This record has not been saved for use yet. You can open it because it belongs to your company; the assignee still needs to click Save for Use.</p>" +
-                        formLineHtml(item);
+                    else if (s && s.canOpen) el.innerHTML = formLineHtml(item) +
+                        "<p class='hint'>This record has not been saved for use yet. You can open it because it belongs to your company; the assignee still needs to click Save for Use.</p>";
                     else el.innerHTML = notYet;
                 });
         }
