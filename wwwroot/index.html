@@ -639,8 +639,27 @@
             api("/auth/refresh-access", { method: "POST" })
                 .catch(function () { })
                 .then(function () {
-                    setFolder("inbox");
-                    if (deepLinkMessageId) openMessage(parseInt(deepLinkMessageId));
+                    if (deepLinkMessageId) openDeepLink(parseInt(deepLinkMessageId));
+                    else setFolder("inbox");
+                });
+        }
+
+        // 2026-11-11 John: a link from CMS (Assigned Tasks) to a message he sent opened it under
+        // Inbox. Show the folder the message is actually in: Inbox or Archived for a recipient
+        // (or a colleague an assignee shared it with), Sent for its author. Falls back to Inbox.
+        function openDeepLink(messageId) {
+            api("/inbox/" + messageId)
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .catch(function () { return null; })
+                .then(function (res) {
+                    var folder = "inbox";
+                    try {
+                        var msg = res ? JSON.parse(res.message)[0] : null;
+                        if (msg && msg.IsRecipient) folder = msg.IsArchived ? "archived" : "inbox";
+                        else if (msg && !msg.AssigneeSharedAccess && !msg.SharedAccess) folder = "sent";
+                    } catch (e) { }
+                    setFolder(folder);
+                    openMessage(messageId);
                 });
         }
 
@@ -2566,9 +2585,8 @@
                     showApp(); // opens ?message= once and strips it
                 } else if (res.messageId) {
                     // Already in the app (possibly as someone else before) — show this
-                    // message from the Inbox.
-                    if (currentFolder !== "inbox") setFolder("inbox"); else loadInbox();
-                    openMessage(res.messageId);
+                    // message under the folder it's in (Inbox, Archived or Sent, 2026-11-11).
+                    openDeepLink(res.messageId);
                 }
             });
         });
