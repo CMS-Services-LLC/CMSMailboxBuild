@@ -1312,10 +1312,21 @@
             var isExam = item.ItemType === "ExamTask" || item.ItemType === "ExamRef";
             // A saved form record opens for its sender too (sql/033); the viewer still
             // checks the sender's own CMS access to the form and record.
-            var isSavedForm = item.ItemType === "IAFormRecord" && item.ItemID && String(item.ItemID) !== "0";
-            var html = taskBanner(item) + originBannerHtml(item) +
+            // ...but not while its task says Saved (not yet Save for Use): the server refuses the
+            // assigner then (IsUnreleasedForOtherCompany), so offer no Open button (2026-11-11).
+            var notReleased = item.ItemType === "IAFormRecord" && item.TaskID && item.TaskStatus === "Saved";
+            var isSavedForm = item.ItemType === "IAFormRecord" && item.ItemID && String(item.ItemID) !== "0" && !notReleased;
+            // 2026-11-11 John: a form task the assignee hasn't saved yet has no record to open, so tell
+            // the sender that instead of the assignee's instruction and "Open it from the message".
+            var formNotCreated = item.ItemType === "IAFormRecord" && !isSavedForm && !notReleased && item.TaskID &&
+                item.TaskType === "FormApplication" && item.TaskStatus !== "Cancelled";
+            var html = taskBanner(item, formNotCreated) + originBannerHtml(item) +
                 (isExam ? examFrameHtml(item, true) : isSavedForm ? formLineHtml(item) : isOpenableReport(item) ? "" : "<strong>" + escapeHtml(item.ItemLabel || item.ItemType) + "</strong>");
-            if (item.IsAssigner && item.TaskStatus === "Pending Review") {
+            if (formNotCreated) {
+                html += "<p class='hint'>This record has not been created yet. It will open here once the assignee saves it.</p>";
+            } else if (notReleased) {
+                html += "<p class='hint'>The assignee has saved this record but hasn't clicked Save for Use yet. It will open here once they do.</p>";
+            } else if (item.IsAssigner && item.TaskStatus === "Pending Review") {
                 html += "<p class='hint'>The assignee has finished this task. Check it in CMS, then mark it completed.</p>" +
                     "<button class='primary' id='reviewBtn_" + item.MessageItemID + "' onclick='reviewTask(" + item.MessageItemID + ")'>Mark as Completed</button>" +
                     "<div class='err' id='reviewMsg_" + item.MessageItemID + "'></div>";
@@ -1461,17 +1472,19 @@
         // Task line shown above an item that carries a task (MBX_Task, sql/006). For a
         // form task MBX_GetMessage derives TaskStatus (sql/007): Open (not started),
         // Saved (record saved but not released yet), Completed (released).
-        function taskBanner(item) {
+        // formNotCreated (the sender's view of a form task with no saved record yet, senderCardHtml):
+        // say so, rather than show the sender the assignee's instruction.
+        function taskBanner(item, formNotCreated) {
             if (!item.TaskID) return "";
             var done = item.TaskStatus === "Completed";
             var pending = item.TaskStatus === "Pending Review";
             var cancelled = item.TaskStatus === "Cancelled";
-            var what = {
+            var what = formNotCreated ? "Form Application sent to be filled out" : {
                 FormApplication: "Fill out this form and click Save for Use",
                 DynamicReport: "Fill in the Excel template and upload it",
                 Exam: "Answer the exam questions and supply the requested documents"
             }[item.TaskType] || "Task";
-            var statusText = {
+            var statusText = formNotCreated ? "Record not yet created" : {
                 Completed: "Completed",
                 "Pending Review": "Pending Review",
                 Saved: "Saved - waiting for Save for Use",
