@@ -709,12 +709,38 @@ namespace CMSMailbox.Controllers
             return s.Length > 300 ? s.Substring(0, 300) : s;
         }
 
+        // Whether this item's form record has been released (Save for Use), and if not,
+        // whether this user's company can still open it (it's the record's own company).
+        // The Sent card uses it to say which, and to offer Open only when it will work
+        // (2026-11-11). Reveals nothing beyond what Bootstrap would: callers who can't
+        // see the item get 404.
+        [HttpGet("item/{messageItemId:int}/record-state")]
+        public IActionResult RecordState(int messageItemId)
+        {
+            int uid = CurrentUID();
+            if (uid == 0) return Unauthorized();
+
+            var dat = DB.GetDB(
+                "select top 1 case when fr.DTReleased is null then 0 else 1 end as Released, " +
+                "case when fr.CID = dbo.mycid(@uid) then 1 else 0 end as OwnCompany " +
+                "from MBX_MessageItem mi " +
+                "join NEO_IAFormRecords xfr on xfr.ID = try_cast(mi.ItemID as int) " +
+                "join NEO_IAFormRecords fr on fr.RecordID = xfr.RecordID and fr.active = 1 " +
+                "where mi.MessageItemID = @messageItemId and mi.ItemType = 'IAFormRecord' and mi.ItemID <> '0' " +
+                "and dbo.MBX_CanOpenItem(mi.MessageItemID, @uid) = 1",
+                uid, "{\"messageItemId\":" + messageItemId + "}");
+            if (dat.Columns.Contains("err") || dat.Rows.Count == 0) return NotFound();
+
+            bool released = Convert.ToInt32(dat.Rows[0]["Released"]) == 1;
+            bool own = Convert.ToInt32(dat.Rows[0]["OwnCompany"]) == 1;
+            return Ok(new { released, canOpen = released || own });
+        }
+
         // True when this user is a recipient of this IAFormRecord item, the record is
-        // active with DTReleased null, and either the user's current company isn't the
-        // record's own company (which can see its unreleased records — that's how the
-        // assignee gets back in to click Save for Use) or the item carries a task the
-        // user isn't an assignee of (its assigner, even in the same company). Only
-        // refuses; it never grants anything.
+        // active with DTReleased null, and the user's current company isn't the
+        // record's own company (which can always see its unreleased records — that's
+        // how the assignee gets back in to click Save for Use). Only refuses; it
+        // never grants anything.
         private static bool IsUnreleasedForOtherCompany(int messageItemId, int uid)
         {
             var dat = DB.GetDB(
@@ -724,12 +750,7 @@ namespace CMSMailbox.Controllers
                 "join NEO_IAFormRecords fr on fr.RecordID = xfr.RecordID and fr.active = 1 " +
                 "where mi.MessageItemID = @messageItemId and mi.ItemType = 'IAFormRecord' and mi.ItemID <> '0' " +
                 "and dbo.MBX_CanOpenItem(mi.MessageItemID, @uid) = 1 " +
-                "and fr.DTReleased is null " +
-                // 2026-11-11 John: a task's assigner in the record's own company could open it before
-                // Save for Use. On a task item only its assignee side (MBX_IsTaskAssignee: the assignee
-                // or a colleague they shared it with) sees the unreleased record.
-                "and (fr.CID <> dbo.mycid(@uid) or exists (select 1 from MBX_Task t " +
-                "where t.MessageItemID = mi.MessageItemID and dbo.MBX_IsTaskAssignee(t.TaskID, @uid) = 0))",
+                "and fr.DTReleased is null and fr.CID <> dbo.mycid(@uid)",
                 uid, "{\"messageItemId\":" + messageItemId + "}");
 
             return dat.Rows.Count > 0 && !dat.Columns.Contains("err");

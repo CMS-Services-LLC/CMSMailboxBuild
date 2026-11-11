@@ -1325,7 +1325,10 @@
             if (formNotCreated) {
                 html += "<p class='hint'>This record has not been created yet. It will open here once the assignee saves it.</p>";
             } else if (notReleased) {
-                html += "<p class='hint'>The assignee has saved this record but hasn't clicked Save for Use yet. It will open here once they do.</p>";
+                // Whether this sender can open it anyway (their company owns the record) is the
+                // server's call: ask, then show the matching message (fillRecordState).
+                html += "<div id='relState_" + item.MessageItemID + "'><p class='hint'>Checking the record...</p></div>";
+                setTimeout(function () { fillRecordState(item); }, 0);
             } else if (item.IsAssigner && item.TaskStatus === "Pending Review") {
                 html += "<p class='hint'>The assignee has finished this task. Check it in CMS, then mark it completed.</p>" +
                     "<button class='primary' id='reviewBtn_" + item.MessageItemID + "' onclick='reviewTask(" + item.MessageItemID + ")'>Mark as Completed</button>" +
@@ -1335,6 +1338,26 @@
             }
             if (isOpenableReport(item)) html += drViewerHtml(item);
             return html;
+        }
+
+        // 2026-11-11 John: a form task's record saved but not yet Save for Use, as its sender sees it.
+        // IaViewerController.RecordState says whether it's released and whether this user can open
+        // it anyway (their company owns the record). Open is offered only when it will work.
+        function fillRecordState(item) {
+            var id = item.MessageItemID;
+            var notYet = "<p class='hint'>The assignee has saved this record but hasn't clicked Save for Use yet. It will open here once they do.</p>";
+            api("/item/" + id + "/record-state")
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .catch(function () { return null; })
+                .then(function (s) {
+                    var el = document.getElementById("relState_" + id);
+                    if (!el) return;
+                    if (s && s.released) el.innerHTML = formLineHtml(item);
+                    else if (s && s.canOpen) el.innerHTML =
+                        "<p class='hint'>This record has not been saved for use yet. You can open it because it belongs to your company; the assignee still needs to click Save for Use.</p>" +
+                        formLineHtml(item);
+                    else el.innerHTML = notYet;
+                });
         }
 
         // On a reply's copy of a task's record/report (sql/015): the original task's
