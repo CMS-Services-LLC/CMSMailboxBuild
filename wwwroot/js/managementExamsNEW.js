@@ -56,6 +56,7 @@ function mgtExamLoadBegin(steps) {
             var el = document.getElementById(d);
             if (el) el.style.display = "";
         });
+        mgtExamFitHeight();     //code:20261113 needs the exam visible to measure
         FocusLastQuestion();    //needs the exam visible to focus/scroll
     };
     setTimeout(function () { steps = 1; done(); }, 60000);
@@ -900,13 +901,11 @@ function handleToggleChange(event) {
     const mainContent = document.getElementById('availExamsInner');
 
     if (isQuestionByQuestionMode) {
-        availExamsInner.style.height = ((availExamsInner.style.height.replace("px", "") * 1) - 100) + "px";
         mainContent.classList.add('question-by-question-mode');
         showQuestionAtIndex(currentQuestionIndex);
         questionTitleSectionState = true;//code 02032025 16:30
 
     } else {
-        availExamsInner.style.height = ((availExamsInner.style.height.replace("px", "") * 1) + 100) + "px";
         mainContent.classList.remove('question-by-question-mode');
         showAllQuestions();
         questionTitleSectionState = false;//code 02032025 16:30
@@ -916,7 +915,29 @@ function handleToggleChange(event) {
         }
     }
     showPreviewQuestions();//code: 01242025 1:00pm
+    mgtExamFitHeight(); //code:20261113 was a fixed -100px / +100px per toggle, so the exam drifted off the window's bottom edge
 }
+
+//code:20261113 John: the exam didn't fill the window exactly, especially after toggling Question-by-Question view.
+//#availExamsInner got a fixed height once (body height - 320) and the toggle then took off / added back 100px, while the
+//Prev/Next buttons, the Release bar and the window size (Exams has its own resizable window) were never measured.
+//Now it takes exactly the space left below it in the window: after the exam is shown, on the toggle, when the
+//Release bar shows or hides, and on resize. Only for an open exam (ExamOpts present), not the exams list.
+function mgtExamFitHeight() {
+    var el = document.getElementById("availExamsInner");
+    if (el == null || el.offsetParent == null || document.getElementById("ExamOpts") == null) return;
+    var minHt = 200;
+    var ht = Math.max(minHt, Math.floor(window.innerHeight - el.getBoundingClientRect().top - 10));
+    el.style.height = ht + "px";
+    //anything under the exam (page padding, footer) would still make the page scroll; take a small overflow back off
+    var over = document.documentElement.scrollHeight - window.innerHeight;
+    if (over > 0 && over <= 80 && ht - over >= minHt) el.style.height = (ht - over) + "px";
+}
+var mgtExamFitTimer = null;
+window.addEventListener("resize", function () {
+    clearTimeout(mgtExamFitTimer);
+    mgtExamFitTimer = setTimeout(mgtExamFitHeight, 100);
+});
 function showQuestionModuleLabel(Assessment_Module) {//code 02032025 16:30
     //alert(Assessment_Module);
     let examSectionHeader = document.getElementById("examSectionHeader");
@@ -1450,7 +1471,7 @@ function MGTPopPrivateDocs() {
                     ((MgtDocsMgtView) ? "|||label|class=redlink|onclick=delExamDoc(" + dr.FID + ",false," + dr.DocFID + ")|x|||label|style=width:10px" : "") +
                     "|||label|icon=file-receiving.png|class=cursor|onclick=" + onclick + "|" + dr.Filename + mgtRelLbl(dr) +
                     ((MgtDocsMgtView) ? "|||label|class=cursor mgtDocPrivToggle|style=color:steelblue; padding-left:15px; font-weight:normal|onclick=MgtToggleDocPrivate(" + dr.DocFID + ",1)|Make private" : ""),
-                    "div|id=docReq2_" + dr.FID + "|style=font-weight:bold; padding:left:10px; padding:5px|Loaded By: " + dr.LoadedByName + " with " + dr.LoadedByCompany + " on " + convertDT(dr.DTCreated) + ", shared with " + xcName +
+                    "div|id=docReq2_" + dr.FID + "|style=font-weight:normal; padding:left:10px; padding:5px|Loaded By: " + dr.LoadedByName + " with " + dr.LoadedByCompany + " on " + convertDT(dr.DTCreated) + ", shared with " + xcName + //code:20261113 John: Loaded By not bold in the management boxes
                     mgtDocDescLink(dr),
                 ]);
                 mgtDocDescShow(document.getElementById("docShared_" + ln.strLineID), dr);
@@ -1465,7 +1486,7 @@ function MGTPopPrivateDocs() {
         privBox.style.cssText = "background-color:#fffcf2; border-radius:4px; margin-bottom:8px"; //code:20261110 subtle tint for management only documents
         sect.insertBefore(privBox, sect.firstChild);
         xsection(privBox, [
-            "div|class=docrequest shadowSection mgtPrivateDocs|style=padding:5px; font-weight:bold; background-color:#fff8e1|&#128274; Management only (not visible to the examined company)" +
+            "div|class=docrequest shadowSection mgtPrivateDocs|style=padding:5px; font-weight:bold; background-color:#fff8e1|&#128274; Documents for Management only (not visible to the examined company)" + //code:20261113 John's wording
             "|||button|class=longblueButton pad10 plusBtn|style=float:right|onclick=MGTUploadDocs(" + MgtXCID + ",'" + ln.ExamID + "','" + ln.LineID + "',null,null,1)|+",
             "div|id=docPriv_" + ln.strLineID + "|class=mgtPrivateDocs|style=padding:10px"
         ]);
@@ -1480,7 +1501,7 @@ function MGTPopPrivateDocs() {
                 "|||label|style=width:10px" +
                 "|||label|icon=document-white.png|class=cursor|onclick=" + onclick + "|" + dr.Filename +
                 "|||label|class=cursor mgtDocPrivToggle|style=color:steelblue; padding-left:15px; font-weight:normal|onclick=MgtToggleDocPrivate(" + dr.DocFID + ",0)|Share with " + String(MgtXCompany || "company").replace(/\|/g, "/"),
-                "div|id=docReq2_" + dr.FID + "|style=font-weight:bold; padding:left:10px; padding:5px|Loaded By: " + dr.LoadedByName + " with " + dr.LoadedByCompany + " on " + convertDT(dr.DTCreated) +
+                "div|id=docReq2_" + dr.FID + "|style=font-weight:normal; padding:left:10px; padding:5px|Loaded By: " + dr.LoadedByName + " with " + dr.LoadedByCompany + " on " + convertDT(dr.DTCreated) + //code:20261113 John: Loaded By not bold in the management boxes
                 mgtDocDescLink(dr),
             ]);
             mgtDocDescShow(document.getElementById("docPriv_" + ln.strLineID), dr);
@@ -1507,7 +1528,7 @@ function mgtDocDescShow(parent, dr) {
     var d = document.createElement("div");
     d.id = "docReq3_" + dr.FID; // removed with the row by delExamDoc
     d.className = "mgtDocDesc";
-    d.style.cssText = "padding:5px 5px 2px 5px; white-space:pre-wrap; font-weight:normal; color:#333";
+    d.style.cssText = "padding:5px 5px 2px 5px; white-space:pre-wrap; font-weight:bold; font-size:15px; color:#222"; //code:20261113 John: description bolder and bigger
     d.textContent = dr.Description;
     var row = document.getElementById("docReq_" + dr.FID);
     if (row != null && row.parentElement == parent) parent.insertBefore(d, row);
@@ -4253,7 +4274,7 @@ function mgtRenderReleaseBar() {
     var bar = document.getElementById("mgtReleaseBar");
     if (!bar) return;
     var p = MgtPending;
-    if (!p || !(p.Total > 0)) { bar.style.display = "none"; bar.innerHTML = ""; return; }
+    if (!p || !(p.Total > 0)) { bar.style.display = "none"; bar.innerHTML = ""; mgtExamFitHeight(); return; } //code:20261113 refit when the bar hides
 
     var parts = [];
     if (p.Answers > 0) parts.push(p.Answers + " answer" + (p.Answers == 1 ? "" : "s"));
@@ -4273,6 +4294,7 @@ function mgtRenderReleaseBar() {
     bar.appendChild(msg);
     bar.appendChild(btn);
     bar.style.display = "flex";
+    mgtExamFitHeight(); //code:20261113 the bar sits above the scrolling exam, so the exam gets shorter while it shows
 }
 
 function mgtRelEsc(t) {
