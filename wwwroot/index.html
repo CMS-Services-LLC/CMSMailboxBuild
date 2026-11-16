@@ -2102,9 +2102,23 @@
             if (btn) btn.disabled = document.getElementById("replyBody").value.trim() === "";
         }
 
+        // 2026-11-16: a tester's reply was saved 7 times (8:47:17-8:47:21): the button stayed enabled
+        // and the box kept its text until the server answered, so every extra click sent another copy.
+        // Now one send at a time: the button locks ("Sending...") until the reply is saved or fails.
+        var replySending = false;
         function sendReply() {
             var errDiv = document.getElementById("replyError");
+            if (replySending) return;
             if (document.getElementById("replyBody").value.trim() === "") return;
+            var btn = document.getElementById("replySendBtn");
+            var unlock = function () {
+                replySending = false;
+                if (btn) btn.textContent = "Send Reply";
+                updateReplyButton();
+            };
+            replySending = true;
+            if (btn) { btn.disabled = true; btn.textContent = "Sending..."; }
+            errDiv.innerText = "";
             var body = {
                 Subject: document.getElementById("replySubject").value,
                 Body: document.getElementById("replyBody").value
@@ -2124,7 +2138,7 @@
                     var newId = rows.length ? rows[0].MessageID : null;
                     var files = pickedFiles.reply || [];
                     document.getElementById("replyBody").value = "";
-                    updateReplyButton();
+                    unlock();   // box is empty now, so the button stays disabled until something is typed
                     if (!newId || !files.length) { errDiv.innerText = "Reply sent."; loadInbox(); return; }
                     errDiv.innerText = "Reply sent. Uploading " + files.length + " attachment(s)...";
                     return uploadAttachments(newId, files).then(function (failed) {
@@ -2134,7 +2148,7 @@
                         loadInbox();
                     });
                 })
-                .catch(function () { errDiv.innerText = "Could not send reply."; });
+                .catch(function () { unlock(); errDiv.innerText = "Could not send reply."; });
         }
 
         // Toggles: Archive from the Inbox, Move to Inbox from the Archived folder
