@@ -8,9 +8,14 @@
 	  signed in to), the same "colleague" rule as MBX_TaskShareCandidates (sql/028), minus the
 	  forwarder. MBX_ForwardMessage re-derives that list itself; nothing from the page is trusted.
 	- What goes: a new message (its own conversation, ReplyToMessageID NULL) from the forwarder with
-	  "Fwd: <subject>", their note, then the original's From / Date / To / Subject and text, and a
-	  copy of the original message's own attachments. Tasks, form records, reports and exams on
-	  the message are NOT forwarded: they stay with the people they were sent to.
+	  "Fwd: <subject>", their note, then the original's From / Date / To / Subject and text, a
+	  copy of the original message's own attachments, and (John 2026-11-16, second pass) every
+	  shared item on it that is NOT a task: form records, completed reports, files, exam files.
+	  Those are new MBX_MessageItem rows pointing at the same records, exactly as replies carry
+	  items (sql/004, 020); access is still re-checked when each one is opened.
+	- Tasks are NOT forwarded (John: "tasks should only be shared through the task assignments
+	  section"): items with an MBX_Task row, ExamRef (points at an exam task), and unstarted
+	  placeholders (ItemID '0') stay behind. Share a task with Share this task instead.
 
 	Needs 029 (MBX_Attachment). Independent of 041. Idempotent; safe to run more than once.
 */
@@ -136,6 +141,16 @@ BEGIN
 	FROM MBX_Attachment a
 	WHERE a.MessageID = @MessageID
 	ORDER BY a.AttachmentID
+
+	-- Shared items that aren't tasks, in their original order.
+	INSERT INTO MBX_MessageItem (MessageID, ItemType, ItemID, ItemLabel, OwnerCID, FormID)
+	SELECT @NewID, mi.ItemType, mi.ItemID, mi.ItemLabel, mi.OwnerCID, mi.FormID
+	FROM MBX_MessageItem mi
+	WHERE mi.MessageID = @MessageID
+	AND mi.ItemType NOT IN ('DRTask', 'ExamTask', 'ExamRef')
+	AND mi.ItemID <> '0'
+	AND NOT EXISTS (SELECT 1 FROM MBX_Task t WHERE t.MessageItemID = mi.MessageItemID)
+	ORDER BY mi.MessageItemID
 
 	COMMIT
 
