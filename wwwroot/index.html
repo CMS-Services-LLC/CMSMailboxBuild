@@ -427,7 +427,13 @@
             if (saved === "1") toggleListPane(true);
         });
 
+        // Bumped on every folder change, so the startup code can tell the user already
+        // picked a folder (e.g. clicked Sent while the access refresh was running) and
+        // must not switch back to Inbox when it finishes (John 2026-11-16).
+        var folderChanges = 0;
+
         function setFolder(folder) {
+            folderChanges++;
             currentFolder = folder;
             currentMessageId = null;
             selectedIds = {};
@@ -635,23 +641,26 @@
 
             // Refresh this user's access cache (NEO_ResetUserCreds, as CMS does on every page load)
             // before listing or opening anything; the access checks read from it. A failed refresh
-            // still loads the page.
+            // still loads the page. A folder the user clicked meanwhile wins over the default Inbox.
+            var changesAtStart = folderChanges;
             api("/auth/refresh-access", { method: "POST" })
                 .catch(function () { })
                 .then(function () {
-                    if (deepLinkMessageId) openDeepLink(parseInt(deepLinkMessageId));
-                    else setFolder("inbox");
+                    if (deepLinkMessageId) openDeepLink(parseInt(deepLinkMessageId), changesAtStart);
+                    else if (folderChanges === changesAtStart) setFolder("inbox");
                 });
         }
 
         // 2026-11-11 John: a link from CMS (Assigned Tasks) to a message he sent opened it under
         // Inbox. Show the folder the message is actually in: Inbox or Archived for a recipient
         // (or a colleague an assignee shared it with), Sent for its author. Falls back to Inbox.
-        function openDeepLink(messageId) {
+        function openDeepLink(messageId, changesAtStart) {
             api("/inbox/" + messageId)
                 .then(function (r) { return r.ok ? r.json() : null; })
                 .catch(function () { return null; })
                 .then(function (res) {
+                    // The user clicked a folder while this was loading: leave them there.
+                    if (changesAtStart != null && folderChanges !== changesAtStart) return;
                     var folder = "inbox";
                     try {
                         var msg = res ? JSON.parse(res.message)[0] : null;
@@ -716,6 +725,110 @@
                     var list = document.getElementById("taskShareList");
                     if (list) list.innerHTML = "<p class='err'>Sharing isn't available for this task.</p>";
                 });
+        }
+
+        // ---- Forward (sql/042, ComposeController.Forward) ------------------------------
+        // A direct recipient sends a copy (text + attachments, not tasks or records) to
+        // colleagues in their own company. The server checks both; this list is a convenience.
+        var forwardTo = [];
+
+        function openForward(messageId) {
+            closeForward();
+            forwardTo = [];
+            var ov = document.createElement("div");
+            ov.id = "forwardOverlay";
+            ov.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.35);z-index:10000;display:flex;align-items:center;justify-content:center";
+            ov.innerHTML = "<div style='background:#fff;border-radius:6px;width:640px;max-width:94%;max-height:85vh;display:flex;flex-direction:column;padding:18px 22px;box-shadow:0 4px 16px rgba(0,0,0,0.3);font-size:14px'>" +
+                "<b style='margin-bottom:6px'>Forward this message</b>" +
+                "<p class='hint' style='margin-top:0'>Send a copy to people in your company. The message text and its attachments are included; tasks, forms, reports and exams on it are not.</p>" +
+                "<input id='forwardFilter' placeholder='Search people...' style='width:100%;padding:6px;margin:4px 0;box-sizing:border-box' oninput='renderForwardTo()' />" +
+                "<div id='forwardList' style='flex:1;min-height:120px;max-height:260px;overflow-y:auto;border:1px solid #e0e8f2;border-radius:3px;padding:6px'><p class='hint'>Loading...</p></div>" +
+                "<div class='hint' id='forwardSummary' style='margin:6px 0'></div>" +
+                "<textarea id='forwardNote' rows='4' placeholder='Add a note (optional)' style='width:100%;padding:6px;margin:4px 0;box-sizing:border-box'></textarea>" +
+                "<div class='err' id='forwardErr'></div>" +
+                "<div style='display:flex;justify-content:flex-end;gap:8px;border-top:1px solid #e0e8f2;padding-top:10px;margin-top:6px'>" +
+                "<button class='secondary' style='width:auto' onclick='closeForward()'>Cancel</button>" +
+                "<button class='primary' style='width:auto' id='forwardSendBtn' onclick='sendForward(" + messageId + ")' disabled>Forward</button></div></div>";
+            document.body.appendChild(ov);
+            api("/inbox/" + messageId + "/forward-recipients")
+                .then(function (r) { if (r.status === 401) { logout(); throw new Error("unauthorized"); } if (!r.ok) throw new Error("failed"); return r.json(); })
+                .then(function (txt) {
+                    forwardTo = (typeof txt === "string" ? JSON.parse(txt) : txt).map(function (u) { u.checked = false; return u; });
+                    renderForwardTo();
+                })
+                .catch(function () {
+                    var el = document.getElementById("forwardList");
+                    if (el) el.innerHTML = "<p class='err'>Couldn't load the people you can forward to.</p>";
+                });
+        }
+
+        function renderForwardTo() {
+            var box = document.getElementById("forwardList");
+            if (!box) return;
+            var q = (document.getElementById("forwardFilter").value || "").trim().toLowerCase();
+            box.innerHTML = "";
+            var shown = forwardTo.filter(function (u) {
+                return u.checked || !q || [u.Name, u.Email].join(" ").toLowerCase().indexOf(q) > -1;
+            });
+            if (!forwardTo.length) box.innerHTML = "<p class='hint'>There's no one else in your company to forward this to.</p>";
+            else if (!shown.length) box.innerHTML = "<p class='hint'>No one matches.</p>";
+            shown.forEach(function (u) {
+                var l = document.createElement("label");
+                l.style.display = "block";
+                var cb = document.createElement("input");
+                cb.type = "checkbox";
+                cb.checked = u.checked;
+                cb.onchange = function () { u.checked = cb.checked; renderForwardSummary(); };
+                l.appendChild(cb);
+                l.appendChild(document.createTextNode(" " + u.Name + (u.Email ? " · " + u.Email : "")));
+                box.appendChild(l);
+            });
+            renderForwardSummary();
+        }
+
+        function renderForwardSummary() {
+            var picked = forwardTo.filter(function (u) { return u.checked; });
+            var el = document.getElementById("forwardSummary");
+            if (el) el.textContent = picked.length ? "To: " + picked.map(function (u) { return u.Name; }).join(", ") : "Choose at least one person.";
+            var btn = document.getElementById("forwardSendBtn");
+            if (btn) btn.disabled = !picked.length;
+        }
+
+        function closeForward() {
+            var ov = document.getElementById("forwardOverlay");
+            if (ov) ov.parentNode.removeChild(ov);
+        }
+
+        function sendForward(messageId) {
+            var to = forwardTo.filter(function (u) { return u.checked; }).map(function (u) { return u.UID; });
+            var err = document.getElementById("forwardErr");
+            var btn = document.getElementById("forwardSendBtn");
+            if (!to.length) { err.innerText = "Choose at least one person."; return; }
+            if (btn.disabled) return;   // one send per click (see the duplicate-reply fix)
+            btn.disabled = true;
+            btn.innerText = "Forwarding...";
+            err.innerText = "";
+            api("/inbox/" + messageId + "/forward", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ToUIDs: to, Note: document.getElementById("forwardNote").value })
+            })
+                .then(function (r) { if (r.status === 401) { logout(); throw new Error("unauthorized"); } return r.json(); })
+                .then(function (res) {
+                    if (res.status !== "ok") {
+                        btn.disabled = false;
+                        btn.innerText = "Forward";
+                        err.innerText = {
+                            not_allowed: "Only a direct recipient of this message can forward it.",
+                            recipient_not_allowed: "One of those people isn't in your company.",
+                            recipients_required: "Choose at least one person."
+                        }[res.status] || "The message couldn't be forwarded.";
+                        return;
+                    }
+                    closeForward();
+                    alert("Forwarded to " + to.length + " " + (to.length === 1 ? "person" : "people") + ". You'll find it in Sent.");
+                })
+                .catch(function () { btn.disabled = false; btn.innerText = "Forward"; err.innerText = "The message couldn't be forwarded."; });
         }
 
         function closeTaskShare(refresh) {
@@ -1139,12 +1252,19 @@
 
         // showLoading: replace the list with the loading message first (first load, folder
         // switch, Refresh). Background reloads (after opening a message) leave it alone.
+        // Only the newest list request counts: starting one cancels the one before it, so a
+        // slow Inbox answer can't land after the user has moved on to Sent or Archived.
+        var listAbort = null;
+
         function loadInbox(showLoading) {
             var folder = currentFolder;
+            if (listAbort) listAbort.abort();
+            var ctl = window.AbortController ? new AbortController() : null;
+            listAbort = ctl;
             if (showLoading || folderRows.length === 0) document.getElementById("inboxList").innerHTML = LIST_LOADING_HTML;
             var btn = document.getElementById("refreshBtn");
             if (btn) btn.disabled = true;
-            return api("/inbox?folder=" + folder)
+            return api("/inbox?folder=" + folder, ctl ? { signal: ctl.signal } : null)
                 .then(function (r) {
                     if (r.status === 401) { logout(); throw new Error("unauthorized"); }
                     return r.text();
@@ -1158,11 +1278,16 @@
                     renderList();
                 })
                 .catch(function (ex) {
+                    if (ex && ex.name === "AbortError") return;   // replaced by a newer request
                     console.log("loadInbox failed", ex);
                     if (folder === currentFolder && folderRows.length === 0)
                         document.getElementById("inboxList").innerHTML = "<p class='err' style='padding:14px'>Messages couldn't be loaded. Click &#8635; to try again.</p>";
                 })
-                .then(function () { if (btn) btn.disabled = false; });
+                .then(function () {
+                    if (listAbort !== ctl) return;   // a newer request owns the Refresh button
+                    listAbort = null;
+                    if (btn) btn.disabled = false;
+                });
         }
 
         // The &#8635; button: reloads the current folder and, if a message is open, its
@@ -1249,7 +1374,8 @@
                     "<span class='attachChips' id='replyFiles'></span></div>" +
                     "<div class='err' id='replyError'></div>" +
                     "<button class='primary' id='replySendBtn' onclick='sendReply()' disabled>Send Reply</button> " +
-                    "<button class='secondary' onclick='archiveCurrent()'>" + (currentArchived ? "Move to Inbox" : "Archive") + "</button>" +
+                    "<button class='secondary' onclick='archiveCurrent()'>" + (currentArchived ? "Move to Inbox" : "Archive") + "</button> " +
+                    "<button class='secondary' onclick='openForward(" + msg.MessageID + ")' title='Send a copy to colleagues in your company'>Forward</button>" +
                     "</div>";
             }
             pane.innerHTML = html;

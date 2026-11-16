@@ -82,6 +82,42 @@ namespace CMSMailbox.Controllers
             return Ok(new { status = "ok", messageId });
         }
 
+        // sql/042: a direct recipient forwards a message to colleagues in their own company. The
+        // proc checks the caller is a recipient and re-derives who they may forward to; it copies
+        // the original's text and attachments into a new message (tasks and records stay behind).
+        [HttpGet("inbox/{messageId:int}/forward-recipients")]
+        public IActionResult ForwardRecipients(int messageId)
+        {
+            int uid = CurrentUID();
+            if (uid == 0) return Unauthorized();
+            return Ok(JsonConvert.SerializeObject(DB.GetDB("exec MBX_GetForwardRecipients @uid, @messageId", uid,
+                new JObject { ["messageId"] = messageId }.ToString())));
+        }
+
+        [HttpPost("inbox/{messageId:int}/forward")]
+        public IActionResult Forward(int messageId, [FromBody] ForwardRequest req)
+        {
+            int uid = CurrentUID();
+            if (uid == 0) return Unauthorized();
+
+            var wanted = (req?.ToUIDs ?? new List<int>()).Distinct().ToList();
+            if (wanted.Count == 0) return Ok(new { status = "recipients_required" });
+
+            // Positional binding (see DB.GetDB): send every parameter in proc order.
+            var dat = DB.GetDB("exec MBX_ForwardMessage @uid, @messageId, @note, @recipientUIDsCSV", uid, new JObject
+            {
+                ["messageId"] = messageId,
+                ["note"] = req.Note ?? "",
+                ["recipientUIDsCSV"] = string.Join(",", wanted)
+            }.ToString());
+            if (dat.Rows.Count == 0) return Ok(new { status = "error" });
+            if (dat.Columns.Contains("err")) return Ok(new { status = dat.Rows[0]["err"].ToString() });
+            int newId = (int)decimal.Parse(dat.Rows[0]["MessageID"].ToString());
+
+            NotifyRecipients(uid, newId);
+            return Ok(new { status = "ok", messageId = newId });
+        }
+
         // Link-only email to each recipient of a message the caller just sent (new or reply).
         // A recipient who still has to set up (never signed in, or reset by User Admin > Reset >
         // Secure Email Setup) gets the activation email instead, as with CMS's Share/Assign.
@@ -228,6 +264,12 @@ namespace CMSMailbox.Controllers
             Response.Headers["X-Content-Type-Options"] = "nosniff";
             return File((byte[])dat.Rows[0]["Bytes"], type, fileName);
         }
+    }
+
+    public class ForwardRequest
+    {
+        public List<int> ToUIDs { get; set; }
+        public string Note { get; set; }
     }
 
     public class ComposeRequest
