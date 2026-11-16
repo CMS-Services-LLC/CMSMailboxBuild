@@ -1215,12 +1215,18 @@
             var html = "<div id='messageScroll'>";
             html += "<h3>" + escapeHtml(msg.Subject) + "</h3>";
             // A colleague a task here was shared with (sql/026): they see it as its sender does.
-            if (msg.SharedAccess) {
+            // sql/041: a Global Administrator of the assigner's or assignee's company (no real share).
+            if (msg.AdminAccess && (msg.SharedAccess || assigneeShare)) {
+                html += "<div class='taskBanner' style='padding:6px 10px;margin-bottom:8px;border-radius:3px;background:#eef2f7;color:#334155'>" +
+                    "<b>Global Administrator access</b> &middot; " + (msg.SharedAccess
+                        ? "you can review and manage this task as " + escapeHtml(msg.FromName) + " would"
+                        : "you can work on this task for your company") + "</div>";
+            } else if (msg.SharedAccess) {
                 html += "<div class='taskBanner' style='padding:6px 10px;margin-bottom:8px;border-radius:3px;background:#eef2f7;color:#334155'>" +
                     "Shared with you by " + escapeHtml(msg.FromName) + " &middot; <b>" + (msg.SharedAccess === "manage" ? "Manage" : "Read only") + "</b>" +
                     (msg.SharedAccess === "manage" ? " (you can review this task as " + escapeHtml(msg.FromName) + " would)" : "") + "</div>";
             }
-            if (assigneeShare) {
+            if (assigneeShare && !msg.AdminAccess) {
                 html += "<div class='taskBanner' style='padding:6px 10px;margin-bottom:8px;border-radius:3px;background:#eef2f7;color:#334155'>" +
                     "A colleague shared this task with you &middot; <b>" + (assigneeShare === "manage" ? "Manage" : "Read only") + "</b>" +
                     (assigneeShare === "manage" ? " (you can work on it)" : " (you can follow it)") + "</div>";
@@ -1353,6 +1359,12 @@
                 html += "<p class='hint'>The assignee has finished this task. Check it in CMS, then mark it completed.</p>" +
                     "<button class='primary' id='reviewBtn_" + item.MessageItemID + "' onclick='reviewTask(" + item.MessageItemID + ")'>Mark as Completed</button>" +
                     "<div class='err' id='reviewMsg_" + item.MessageItemID + "'></div>";
+            } else if (item.IsAssigner && item.TaskType === "Exam" && item.RequiresReview && item.TaskStatus === "Open") {
+                // sql/041 (2026-11-16, John): an exam task can be completed before the assignee
+                // starts it here, e.g. when the exam was worked in CMS. Refused while it has unreleased changes.
+                html += "<p class='hint'>The assignee hasn't started this exam in the mailbox. If the exam is done, you can mark the task completed.</p>" +
+                    "<button class='primary' id='reviewBtn_" + item.MessageItemID + "' onclick='reviewTask(" + item.MessageItemID + ")'>Mark as Completed</button>" +
+                    "<div class='err' id='reviewMsg_" + item.MessageItemID + "'></div>";
             } else if (!isOpenableReport(item) && !isExam && !isSavedForm) {
                 html += "<p class='hint'>Attached to this message. Open it from the message you received, or in CMS.</p>";
             }
@@ -1439,12 +1451,15 @@
             api("/item/" + messageItemId + "/task/review", { method: "POST" })
                 .then(function (r) {
                     if (r.status === 401) { logout(); throw new Error("unauthorized"); }
+                    if (r.status === 409) throw new Error("unreleased");   // sql/041
                     if (!r.ok) throw new Error("refused");
                     refreshTaskCards();
                 })
-                .catch(function () {
+                .catch(function (ex) {
                     btn.disabled = false;
-                    msg.innerText = "This task couldn't be marked completed. Refresh the message and try again.";
+                    msg.innerText = (ex && ex.message === "unreleased")
+                        ? "This exam has changes that haven't been released yet. Release them in the exam, then mark the task completed."
+                        : "This task couldn't be marked completed. Refresh the message and try again.";
                 });
         }
 

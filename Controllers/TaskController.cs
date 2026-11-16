@@ -29,7 +29,10 @@ namespace CMSMailbox.Controllers
                     ["detail"] = ok ? "task marked completed (review)" : "task review refused: " + (dat.Columns.Contains("err") ? dat.Rows[0]["err"] : "no result")
                 }.ToString());
 
-            return ok ? Ok() : NotFound();
+            if (ok) return Ok();
+            // sql/041: an exam with unreleased changes can't be completed yet (index.html says so)
+            if (dat.Columns.Contains("err") && dat.Rows.Count > 0 && dat.Rows[0]["err"]?.ToString() == "unreleased") return Conflict();
+            return NotFound();
         }
 
         // Assignee-side sharing (sql/028): whoever was assigned a task shares it with colleagues in
