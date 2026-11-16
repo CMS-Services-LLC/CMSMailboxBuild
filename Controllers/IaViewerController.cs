@@ -125,7 +125,15 @@ namespace CMSMailbox.Controllers
                 return StatusCode(403, new { reason = "notcreated" });
 
             var ctx = ResolveAndGateByMessageItem(messageItemId, uid);
-            if (ctx == null) return NotFound();
+            if (ctx == null)
+            {
+                // 2026-11-16 (PROD, TD Bank): a recipient whose teams don't include the form got
+                // "You no longer have access". Say what's actually missing so they can ask their
+                // administrator. Only worked out after a refusal, so a normal open costs nothing extra.
+                string formName = MissingFormGrant(messageItemId, uid);
+                if (formName != null) return StatusCode(403, new { reason = "noform", formName });
+                return NotFound();
+            }
 
             var creds = DB.GetDB("exec NEO_GetMGTCID @uid", uid);
             var security = DB.GetDB("exec NEO_NewSecurity @uid", uid);
@@ -654,6 +662,28 @@ namespace CMSMailbox.Controllers
 
             if (lookup.Rows.Count == 0 || lookup.Columns.Contains("err")) return null;
             return lookup.Rows[0]["FormID"]?.ToString();
+        }
+
+        // The form's name when the caller may see this form item (recipient, sender, or shared) but
+        // their own CMS permissions don't include the form (Gate A); otherwise null. Shows nothing the
+        // caller can't already see: the item's label already names the form.
+        private string MissingFormGrant(int messageItemId, int uid)
+        {
+            var lookup = DB.GetDB(
+                "select mi.ItemType, mi.FormID, mi.ItemLabel, fn.FormName from MBX_MessageItem mi " +
+                "left join NEO_IAFormNames fn on fn.FormID = mi.FormID and fn.Active = 1 " +
+                "where mi.MessageItemID = @messageItemId and dbo.MBX_CanOpenItem(mi.MessageItemID, @uid) = 1",
+                uid, "{\"messageItemId\":" + messageItemId + "}");
+            if (lookup.Rows.Count == 0 || lookup.Columns.Contains("err") || lookup.Rows[0]["ItemType"].ToString() != "IAFormRecord") return null;
+            string formId = lookup.Rows[0]["FormID"]?.ToString();
+            if (string.IsNullOrEmpty(formId)) return null;
+
+            var security = DB.GetDB("exec NEO_NewSecurity @uid", uid);
+            if (security.Columns.Contains("err") || GrantsForm(security, formId)) return null;
+
+            string name = lookup.Rows[0]["FormName"]?.ToString();
+            if (string.IsNullOrWhiteSpace(name)) name = lookup.Rows[0]["ItemLabel"]?.ToString();
+            return name ?? "";   // "" = refused for the form, name unknown
         }
 
         private bool PassesGates(int uid, int mainId, string formId) => GateFailure(uid, mainId, formId) == null;

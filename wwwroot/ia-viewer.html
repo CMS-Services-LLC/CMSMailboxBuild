@@ -223,6 +223,12 @@
               document.getElementById("mbxDeniedBanner").textContent =
                 "This record has either not yet been created or has not been saved for use.";
             }
+            // ... or (reason "noform", 2026-11-16) the recipient's teams don't include this form.
+            if (res && res.reason === "noform") {
+              document.getElementById("mbxDeniedBanner").textContent =
+                "You don't have permission for " + (res.formName ? "the " + res.formName + " form" : "this form") + ", so this record can't be opened. " +
+                "Ask your administrator to add the form to one of your teams, then open this message again.";
+            }
             throw new Error("bootstrap refused: " + (res && res.reason));
           });
         }
