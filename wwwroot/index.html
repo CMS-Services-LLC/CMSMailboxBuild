@@ -2514,7 +2514,7 @@
             card.appendChild(frame);
             document.getElementById("mbxFullscreenTitle").textContent = line.getAttribute("data-title");
             // A form's button becomes "Close without saving" only once it has save
-            // buttons to offer (mbxSyncSaveButtons); a view-only record just closes.
+            // buttons and an unsaved change (mbxSyncSaveButtons); otherwise it is "Close".
             document.getElementById("mbxCloseBtn").textContent = "Close";
             document.getElementById("mbxFullscreenHint").textContent = kind === "exam" ? "Your answers are saved as you type them." : "";
             mbxSetFullscreen(frame);
@@ -2563,7 +2563,10 @@
             Array.prototype.forEach.call(doc.querySelectorAll("#dispButtons > button:not(.btnIASave)"), function (b) {
                 if (/^\s*Save/i.test(b.textContent) && b.style.display !== "none") b.style.display = "none";
             });
-            document.getElementById("mbxCloseBtn").textContent = originals.length ? "Close without saving" : "Close";
+            // "Close without saving" only once something was actually changed (John
+            // 2026-11-17); the observer re-runs this when the frame's body gets mbxDirty.
+            document.getElementById("mbxCloseBtn").textContent =
+                (originals.length && doc.body.classList.contains("mbxDirty")) ? "Close without saving" : "Close";
             var holder = document.getElementById("mbxFullscreenSaves");
             var sig = originals.map(function (b) { return b.textContent + "|" + b.disabled + "|" + b.title; }).join("~");
             if (holder.getAttribute("data-sig") !== sig) {
