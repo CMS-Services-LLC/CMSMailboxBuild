@@ -2637,21 +2637,15 @@
         window.addEventListener("message", function (event) {
             if (event.origin !== window.location.origin) return;
             if (event.data && event.data.mbxActivity) { resetIdle(); return; }
-            // ia-viewer.html's mbxRecordSaved(): a record was just saved. Save for
-            // Use closes it (back to its summary line); Save & Review re-opens it in
-            // place so the user stays on it until they Save for Use or Close
-            // (2026-11-10). Either way refresh the task lines and that line's record
-            // ID — not the whole message.
+            // ia-viewer.html's mbxRecordSaved(): a record was just saved. Every save
+            // re-opens it in place; only Close closes it (John 2026-11-17 — Save for Use
+            // used to close it). Either way refresh the task lines and that line's
+            // record ID — not the whole message.
             if (event.data && event.data.mbxRecordSaved) {
                 if (mbxFullscreenFrame && mbxFullscreenFrame.contentWindow === event.source) {
-                    if (event.data.released) {
-                        mbxClearFullscreen();
-                        mbxShowSavedNotice(event.data.notice || "Record saved");
-                    } else {
-                        mbxReloadOpenRecord(mbxFullscreenFrame);
-                        // Approve/Decline passes its own notice (2026-11-17).
-                        mbxShowSavedNotice(event.data.notice || "Record saved. It stays open for review until you Save for Use or Close.");
-                    }
+                    mbxReloadOpenRecord(mbxFullscreenFrame);
+                    // Approve/Decline and Set as Closed/Open pass their own notice.
+                    mbxShowSavedNotice(event.data.notice || "Record saved");
                 }
                 refreshTaskCards();
                 return;

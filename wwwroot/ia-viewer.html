@@ -172,8 +172,8 @@
     });
 
     // `released` is SubmitRecord's: 1 for Save for Use (and Save on an
-    // already-released record), falsy for Save & Review. index.html closes the
-    // record only on the first; Save & Review re-opens it in place (2026-11-10).
+    // already-released record), falsy for Save & Review. index.html re-opens the
+    // record in place after every save; only Close closes it (2026-11-17).
     // `notice` (optional) replaces the mailbox's "Record saved" (Approve/Decline).
     function mbxRecordSaved(released, notice) {
       mbxOriginals.clear();
