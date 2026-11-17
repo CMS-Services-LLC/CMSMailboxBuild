@@ -2080,7 +2080,10 @@ function SetApprovalStatus(main, mainid, go, AD, gobaby) {
                     xconfirm("This record could not be " + ((AD == 0) ? "approved" : "declined") + ". Your company may not be the one this approval is waiting on.");
                     return;
                 }
-                mbxRecordSaved(1, "Record " + ((AD == 0) ? "approved" : "declined"));
+                // 0 = re-open in place (2026-11-17, John): after Approve/Decline the
+                // record stays open so the new status shows; Set as Closed is the
+                // action that closes it (OpenCloseRecord).
+                mbxRecordSaved(0, "Record " + ((AD == 0) ? "approved" : "declined"));
                 return;
             }
             GetMain(mainid);
@@ -3694,6 +3697,27 @@ function buildDisputeSectionLine(begin, js, cw, title, fldname, type, type2, lin
 function OpenCloseRecord(mainid, openClose) {
     if (mainid)
         getData(null, newFormData("_IAOpenCloseRecord", { mainid: mainid }), function (vr) {
+            // CMSMailbox adaptation (2026-11-17): after Set as Closed / Set as Open the
+            // mailbox closes the form (back to its summary line) with a notice. Any
+            // edited fields are saved first, like CMS does; a view-only record has none,
+            // and SubmitRecord would only say "no assigned fields to save". The server
+            // answers "[]" when it refuses.
+            if (typeof mbxRecordSaved === "function") {
+                var rows = [];
+                try { rows = jparse(vr); } catch (e) { rows = []; }
+                if (!rows.length || rows[0].err != null) {
+                    xconfirm("This record could not be " + ((openClose == "CLOSED") ? "opened" : "closed") + ".");
+                    return;
+                }
+                var notice = (rows[0].Closed == 1) ? "Record closed" : "Record opened";
+                if (document.getElementsByClassName("submitInputField").length > 0) {
+                    mbxOpenCloseNotice = notice;
+                    SubmitRecord(mainid, 0);
+                } else {
+                    mbxRecordSaved(1, notice);
+                }
+                return;
+            }
             SendEmailAlert("Form Applications", mainid.toString());
             btnOpenClose.innerHTML = (openClose == "OPEN") ? "Set as Open" : "Set as Closed";
 
@@ -4153,6 +4177,8 @@ function LockRecord(mainid, go) {
         })
     }
 }
+// CMSMailbox: set by OpenCloseRecord so the save it runs closes the form.
+var mbxOpenCloseNotice = null;
 function SubmitRecord(mainid, released) {
     //code:20241108:jk:clone record
     if (cloneID != null)
@@ -4252,6 +4278,13 @@ function SubmitRecord(mainid, released) {
                         // `released` tells Save for Use (closes the record) apart
                         // from Save & Review (record stays open, 2026-11-10).
                         if (typeof mbxRecordSaved === "function") {
+                            // Save run by Set as Closed/Open: close the form with its notice.
+                            if (mbxOpenCloseNotice) {
+                                var n = mbxOpenCloseNotice;
+                                mbxOpenCloseNotice = null;
+                                mbxRecordSaved(1, n);
+                                return;
+                            }
                             mbxRecordSaved(released);
                             return;
                         }

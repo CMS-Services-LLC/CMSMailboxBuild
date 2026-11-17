@@ -2643,7 +2643,8 @@
                         mbxShowSavedNotice(event.data.notice || "Record saved");
                     } else {
                         mbxReloadOpenRecord(mbxFullscreenFrame);
-                        mbxShowSavedNotice("Record saved. It stays open for review until you Save for Use or Close.");
+                        // Approve/Decline passes its own notice (2026-11-17).
+                        mbxShowSavedNotice(event.data.notice || "Record saved. It stays open for review until you Save for Use or Close.");
                     }
                 }
                 refreshTaskCards();
