@@ -310,6 +310,9 @@
         var token = sessionStorage.getItem("mbxToken") || "";
         var pendingToken = "";
         var currentMessageId = null;
+        // Last message opened in each folder (2026-11-17, John): going to Sent and back to
+        // Inbox re-opens and highlights it instead of leaving nothing selected.
+        var lastOpenByFolder = {};
         var currentFolder = "inbox";   // "inbox" | "sent" | "archived"
         var currentArchived = false;   // whether the open message is archived (recipient's own flag)
         var EMPTY_PANE_HTML = "<p class=\"hint\" style=\"padding:10px\">Select a message.</p>";
@@ -404,6 +407,7 @@
             // Don't leave this user's list or open message in the page for whoever logs in next.
             folderRows = [];
             currentMessageId = null;
+            lastOpenByFolder = {};
             document.getElementById("inboxList").innerHTML = "";
             document.getElementById("messagePane").innerHTML = EMPTY_PANE_HTML;
             // Popups that sit outside #appScreen would stay up over the login screen (idle timeout).
@@ -447,6 +451,8 @@
             // Don't leave the previous folder's rows on screen under the new tab while
             // the new list is still loading.
             loadInbox(true);
+            // Back to a folder: re-open the message that was open in it.
+            if (lastOpenByFolder[folder]) openMessage(lastOpenByFolder[folder]);
         }
 
         // ---- Session: idle timeout + heartbeat (same idea as CMSNEO's layout.js /
@@ -1302,6 +1308,7 @@
 
         function openMessage(messageId) {
             currentMessageId = messageId;
+            lastOpenByFolder[currentFolder] = messageId;
             markSelectedRow();
             api("/inbox/" + messageId)
                 .then(function (r) {
@@ -1309,6 +1316,9 @@
                     return r.json();
                 })
                 .then(function (res) {
+                    // Another message was opened while this one loaded (e.g. a deep link
+                    // right after a folder switch re-opened the folder's last message).
+                    if (currentMessageId !== messageId) return;
                     var msg = JSON.parse(res.message)[0];
                     var items = JSON.parse(res.items);
                     renderMessage(msg, items);
@@ -2362,6 +2372,7 @@
             }))
                 .then(function () {
                     currentMessageId = null;
+                    delete lastOpenByFolder[currentFolder]; // it left this folder
                     document.getElementById("messagePane").innerHTML = EMPTY_PANE_HTML;
                     loadInbox();
                 })
@@ -2423,6 +2434,7 @@
                   .catch(function (ex) { if (ex.message === "unauthorized") throw ex; return false; });
             }))
                 .then(function () {
+                    if (ids.indexOf(lastOpenByFolder[currentFolder]) > -1) delete lastOpenByFolder[currentFolder];
                     if (ids.indexOf(currentMessageId) > -1) {
                         currentMessageId = null;
                         document.getElementById("messagePane").innerHTML = EMPTY_PANE_HTML;
