@@ -2245,7 +2245,8 @@ function ShareToMailbox(MainID, FormID, Label) {
             for (var i = 0; i < dat.length; i++) {
                 var opt = document.createElement("option");
                 opt.value = dat[i].UID;
-                opt.text = dat[i].Name + " <" + dat[i].Email + ">";
+                //code:20261117 ia_001: name + company, like Assign Tasks (NEO_IAGetRecipients now returns Company)
+                opt.text = dat[i].Name + (dat[i].Company ? " (" + dat[i].Company + ")" : "") + " <" + dat[i].Email + ">";
                 sel.appendChild(opt);
             }
         })
@@ -2261,7 +2262,8 @@ function SubmitShareToMailbox(MainID, FormID, Label) {
     var sel = document.getElementById("shareMailboxRecipients");
     var recipients = [];
     for (var i = 0; i < sel.options.length; i++) {
-        if (sel.options[i].selected) recipients.push(parseInt(sel.options[i].value));
+        // one person can be listed once per company; send them one copy
+        if (sel.options[i].selected && recipients.indexOf(parseInt(sel.options[i].value)) == -1) recipients.push(parseInt(sel.options[i].value));
     }
 
     var errDiv = document.getElementById("shareMailboxError");
