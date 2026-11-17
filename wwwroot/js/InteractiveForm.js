@@ -3698,7 +3698,8 @@ function OpenCloseRecord(mainid, openClose) {
     if (mainid)
         getData(null, newFormData("_IAOpenCloseRecord", { mainid: mainid }), function (vr) {
             // CMSMailbox adaptation (2026-11-17): after Set as Closed / Set as Open the
-            // mailbox closes the form (back to its summary line) with a notice. Any
+            // record re-opens in place (John: keep it open, like Approve/Decline) with a
+            // notice, so the new Record: OPEN/CLOSED state and button show. Any
             // edited fields are saved first, like CMS does; a view-only record has none,
             // and SubmitRecord would only say "no assigned fields to save". The server
             // answers "[]" when it refuses.
@@ -3714,7 +3715,7 @@ function OpenCloseRecord(mainid, openClose) {
                     mbxOpenCloseNotice = notice;
                     SubmitRecord(mainid, 0);
                 } else {
-                    mbxRecordSaved(1, notice);
+                    mbxRecordSaved(0, notice);
                 }
                 return;
             }
@@ -4278,11 +4279,11 @@ function SubmitRecord(mainid, released) {
                         // `released` tells Save for Use (closes the record) apart
                         // from Save & Review (record stays open, 2026-11-10).
                         if (typeof mbxRecordSaved === "function") {
-                            // Save run by Set as Closed/Open: close the form with its notice.
+                            // Save run by Set as Closed/Open: re-open in place with its notice.
                             if (mbxOpenCloseNotice) {
                                 var n = mbxOpenCloseNotice;
                                 mbxOpenCloseNotice = null;
-                                mbxRecordSaved(1, n);
+                                mbxRecordSaved(0, n);
                                 return;
                             }
                             mbxRecordSaved(released);
