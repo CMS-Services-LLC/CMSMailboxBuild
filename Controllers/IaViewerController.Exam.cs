@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.IO;
@@ -95,6 +95,11 @@ namespace CMSMailbox.Controllers
             public int ExamCID, OriginItemID;
             public bool CanWrite;
             public bool IsAssigner => Role == "Assigner";
+            // The UID every exam call runs as: the signed-in user, except a management user
+            // assigned the task through their account at the examined company (sql/044) who
+            // signed in with their management account, the same person by email. Then it's
+            // that examined-company account, as CMS's company toggle would be.
+            public int ActAsUID;
         }
 
         private static bool IsExamItem(int messageItemId)
@@ -115,7 +120,7 @@ namespace CMSMailbox.Controllers
                 return null;
             }
             var r = dat.Rows[0];
-            return new ExamTaskContext
+            var ctx = new ExamTaskContext
             {
                 ExamID = r["ExamID"].ToString(),
                 ExamCID = Convert.ToInt32(r["ExamCID"]),
@@ -124,8 +129,29 @@ namespace CMSMailbox.Controllers
                 TaskStatus = r["TaskStatus"]?.ToString() ?? "",
                 Role = r["Role"]?.ToString() ?? "",
                 OriginItemID = Convert.ToInt32(r["OriginItemID"]),
-                CanWrite = Convert.ToBoolean(r["CanWrite"])
+                CanWrite = Convert.ToBoolean(r["CanWrite"]),
+                ActAsUID = uid
             };
+
+            // Assignee signed in from another company: act as the task's own assignee account
+            // when it is at the examined company and is this same person (MBX_IsTaskAssigneeOwner:
+            // that UID, or an active account with the same email). Not for 'manage' colleagues,
+            // who are at the assignee's company already.
+            if (ctx.Role == "Assignee")
+            {
+                var a = DB.GetDB(
+                    "select t.AssignedToUID from MBX_Task t " +
+                    "where t.TaskID = @taskid and t.AssignedToUID <> @uid " +
+                    "and dbo.mycid(@uid) <> t.ExamCID and dbo.mycid(t.AssignedToUID) = t.ExamCID " +
+                    "and dbo.MBX_IsTaskAssigneeOwner(t.TaskID, @uid) = 1 " +
+                    "and exists (select 1 from Users au where au.UID = t.AssignedToUID and au.Active = 1)",
+                    uid, new JObject { ["taskid"] = Convert.ToInt32(r["TaskID"]) }.ToString());
+                if (a.Rows.Count > 0 && !a.Columns.Contains("err"))
+                {
+                    ctx.ActAsUID = Convert.ToInt32(a.Rows[0]["AssignedToUID"]);
+                }
+            }
+            return ctx;
         }
 
         // What exam-viewer.html needs to stand the copied viewer up: the exam, and the
@@ -138,6 +164,7 @@ namespace CMSMailbox.Controllers
 
             var ctx = ResolveExamTask(messageItemId, uid);
             if (ctx == null) return NotFound();
+            uid = ctx.ActAsUID;   // sql/044: see ExamTaskContext.ActAsUID
 
             var me = DB.GetDB("select dbo.mycid(u.UID) as MyCID, c.Company as MyCompany, u.Fname as FName, u.Lname as LName " +
                 "from Users u left join Companies c on c.CID = dbo.mycid(u.UID) where u.UID = @uid", uid);
@@ -166,6 +193,7 @@ namespace CMSMailbox.Controllers
         {
             var ctx = ResolveExamTask(messageItemId, uid);
             if (ctx == null) return Content("[]");
+            uid = ctx.ActAsUID;   // sql/044: see ExamTaskContext.ActAsUID
 
             bool isWrite = ExamWriteActions.Contains(action ?? "") || (ctx.IsAssigner && ExamAssignerWriteActions.Contains(action ?? ""));
             if (!isWrite && !ExamReadActions.Contains(action ?? ""))
@@ -227,6 +255,7 @@ namespace CMSMailbox.Controllers
         {
             var ctx = ResolveExamTask(messageItemId, uid);
             if (ctx == null) return Content("[]");
+            uid = ctx.ActAsUID;   // sql/044: see ExamTaskContext.ActAsUID
 
             if (!string.Equals(action, "_MGTExamUploadDoc", StringComparison.OrdinalIgnoreCase))
             {
@@ -278,6 +307,7 @@ namespace CMSMailbox.Controllers
 
             var ctx = ResolveExamTask(messageItemId, uid);
             if (ctx == null) return NotFound();
+            uid = ctx.ActAsUID;   // sql/044: see ExamTaskContext.ActAsUID
 
             fid = Math.Abs(fid);
             var dat = DB.GetDB(
@@ -436,6 +466,7 @@ namespace CMSMailbox.Controllers
             if (uid == 0) return Unauthorized();
             var ctx = ResolveExamTask(messageItemId, uid);
             if (ctx == null) return NotFound();
+            uid = ctx.ActAsUID;   // sql/044: see ExamTaskContext.ActAsUID
 
             var jo = string.IsNullOrEmpty(strjson) ? new JObject() : JObject.Parse(strjson);
             if (!WorkflowExamMatches(jo, ctx)) { LogAccess(messageItemId, uid, "Denied", "exam workflow pdf: examid is not the task's exam"); return NotFound(); }
@@ -454,6 +485,7 @@ namespace CMSMailbox.Controllers
             if (uid == 0) return Unauthorized();
             var ctx = ResolveExamTask(messageItemId, uid);
             if (ctx == null) return Content(new JObject { ["status"] = "not_found" }.ToString(), "application/json");
+            uid = ctx.ActAsUID;   // sql/044: see ExamTaskContext.ActAsUID
 
             var jo = string.IsNullOrEmpty(strjson) ? new JObject() : JObject.Parse(strjson);
             ContentResult St(string s) => Content(new JObject { ["status"] = s }.ToString(), "application/json");
@@ -551,6 +583,7 @@ namespace CMSMailbox.Controllers
             if (uid == 0) return Unauthorized();
             var ctx = ResolveExamTask(messageItemId, uid);
             if (ctx == null) return NotFound();
+            uid = ctx.ActAsUID;   // sql/044: see ExamTaskContext.ActAsUID
             if (string.IsNullOrEmpty(html)) return BadRequest();
 
             bool docx = string.Equals(kind, "docx", StringComparison.OrdinalIgnoreCase);
@@ -576,6 +609,7 @@ namespace CMSMailbox.Controllers
             if (uid == 0) return Unauthorized();
             var ctx = ResolveExamTask(messageItemId, uid);
             if (ctx == null) return NotFound();
+            uid = ctx.ActAsUID;   // sql/044: see ExamTaskContext.ActAsUID
             if (ctx.Role != "Assigner" && ctx.Role != "Viewer") { LogAccess(messageItemId, uid, "Denied", "exam heatmap doc: management view only"); return Content(""); }
 
             string token = MintCmsToken(uid);
@@ -602,6 +636,7 @@ namespace CMSMailbox.Controllers
             if (uid == 0) return Unauthorized();
             var ctx = ResolveExamTask(messageItemId, uid);
             if (ctx == null) return NotFound();
+            uid = ctx.ActAsUID;   // sql/044: see ExamTaskContext.ActAsUID
 
             var f = Request.Form;
             if (!string.Equals(f["examGUID"].ToString(), ctx.ExamID, StringComparison.OrdinalIgnoreCase))
