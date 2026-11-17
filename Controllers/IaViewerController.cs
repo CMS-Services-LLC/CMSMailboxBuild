@@ -65,7 +65,7 @@ namespace CMSMailbox.Controllers
         private static readonly HashSet<string> PinnedToItemRecord = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "_IAGetHistory", "_IAGetJoinRecord", "_IAGetMultiAnswers", "_IAGetSetAprovalBy",
-            "_IAApproveDecline"
+            "_IAApproveDecline", "_IAOpenCloseRecord"
         };
 
         // Write actions — unblocked 2026-09-22 once every one of these procs' own
@@ -87,7 +87,12 @@ namespace CMSMailbox.Controllers
             // Approve / Decline (2026-11-10). NEO_IAApproveDecline checks nothing about
             // the caller, so it is pinned to this item's record and AdHoc also requires
             // the caller's company to be the record's approving company.
-            "_IAApproveDecline"
+            "_IAApproveDecline",
+            // Set as Closed / Set as Open (2026-11-17). Was missing, so the button did
+            // nothing in the mailbox. NEO_IAOpenCloseRecord checks nothing about the
+            // caller (any mainid it is given gets toggled), so it is pinned to this
+            // item's record above; the two gates already passed for that record.
+            "_IAOpenCloseRecord"
         };
 
         // New-record mode (a FormApplication task, sql/006): the item's ItemID is still
