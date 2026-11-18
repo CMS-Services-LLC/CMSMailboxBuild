@@ -33,6 +33,7 @@ namespace CMSMailbox.Controllers
         {
             int uid = CurrentUID();
             if (uid == 0) return Unauthorized();
+            uid = ActAs(messageItemId, uid);   // sql/049
 
             string reportId = ReportFor(messageItemId, uid);
             if (reportId == null) return NotFound();
@@ -138,6 +139,7 @@ namespace CMSMailbox.Controllers
         {
             int uid = CurrentUID();
             if (uid == 0) return Unauthorized();
+            uid = ActAs(messageItemId, uid);   // sql/049
             string reportId = ReportFor(messageItemId, uid);
             if (reportId == null) return NotFound();
             if (req?.Keys == null || req.Vals == null || req.Keys.Count != req.Vals.Count) return BadRequest();
@@ -161,6 +163,7 @@ namespace CMSMailbox.Controllers
         {
             int uid = CurrentUID();
             if (uid == 0) return Unauthorized();
+            uid = ActAs(messageItemId, uid);   // sql/049
             string reportId = ReportFor(messageItemId, uid);
             if (reportId == null) return NotFound();
 
@@ -191,6 +194,7 @@ namespace CMSMailbox.Controllers
         {
             int uid = CurrentUID();
             if (uid == 0) return Unauthorized();
+            uid = ActAs(messageItemId, uid);   // sql/049
             string reportId = ReportFor(messageItemId, uid);
             if (reportId == null) return NotFound();
             if (Request.Form.Files.Count == 0) return Ok(new { status = "file_required" });
@@ -326,6 +330,7 @@ namespace CMSMailbox.Controllers
         {
             int uid = CurrentUID();
             if (uid == 0) return Unauthorized();
+            uid = ActAs(messageItemId, uid);   // sql/049
 
             var row = RowAccess(messageItemId, uid, drid);
             if (row == null) return NotFound();
@@ -372,6 +377,7 @@ namespace CMSMailbox.Controllers
         {
             int uid = CurrentUID();
             if (uid == 0) return Unauthorized();
+            uid = ActAs(messageItemId, uid);   // sql/049
 
             var row = RowAccess(messageItemId, uid, drid);
             if (row == null || !row.IsMine) return NotFound();
@@ -395,6 +401,7 @@ namespace CMSMailbox.Controllers
         {
             int uid = CurrentUID();
             if (uid == 0) return Unauthorized();
+            uid = ActAs(messageItemId, uid);   // sql/049
             if (RowAccess(messageItemId, uid, drid) == null) return NotFound();
 
             var dat = DB.GetDB("select Filename, FileData from NEO_DynamicReportDocs where FID = @fid and DR_ID = @drid and active = 1", uid,
@@ -411,6 +418,7 @@ namespace CMSMailbox.Controllers
         {
             int uid = CurrentUID();
             if (uid == 0) return Unauthorized();
+            uid = ActAs(messageItemId, uid);   // sql/049
             if (RowAccess(messageItemId, uid, drid) == null) return NotFound();
             if (Request.Form.Files.Count == 0) return BadRequest();
 
@@ -439,6 +447,7 @@ namespace CMSMailbox.Controllers
         {
             int uid = CurrentUID();
             if (uid == 0) return Unauthorized();
+            uid = ActAs(messageItemId, uid);   // sql/049
             if (RowAccess(messageItemId, uid, drid) == null) return NotFound();
 
             var mine = DB.GetDB("select FID from NEO_DynamicReportDocs where FID = @fid and DR_ID = @drid and uid = @uid and active = 1", uid,
@@ -459,6 +468,7 @@ namespace CMSMailbox.Controllers
         {
             int uid = CurrentUID();
             if (uid == 0) return Unauthorized();
+            uid = ActAs(messageItemId, uid);   // sql/049
             if (RowAccess(messageItemId, uid, drid) == null) return NotFound();
             if (string.IsNullOrWhiteSpace(req?.Note)) return BadRequest();
 
@@ -488,6 +498,7 @@ namespace CMSMailbox.Controllers
         {
             int uid = CurrentUID();
             if (uid == 0) return Unauthorized();
+            uid = ActAs(messageItemId, uid);   // sql/049
             if (RowAccess(messageItemId, uid, drid) == null) return NotFound();
             if (!Guid.TryParse(nid, out _)) return BadRequest();
 
@@ -499,6 +510,26 @@ namespace CMSMailbox.Controllers
                 new JObject { ["type"] = "D", ["fid"] = -drid, ["nid"] = nid, ["Note"] = "", ["xCIDs"] = "" }.ToString());
             LogAccess(messageItemId, uid, "Served", "DR row " + drid + ": note deleted");
             return Ok();
+        }
+
+        // sql/049 (2026-11-18): an "update an existing report" task assigned to a management user's
+        // account AT the report's company. When that same person (same email, MBX_IsTaskAssigneeOwner)
+        // signs in with their management account, act as the assigned account, so the gates see the
+        // message's recipient and edits / new rows belong to the report's company (as for exams,
+        // IaViewerController.Exam.cs ActAsUID, sql/044). Anyone else keeps their own UID.
+        private static int ActAs(int messageItemId, int uid)
+        {
+            var a = DB.GetDB(
+                "select top 1 t.AssignedToUID from MBX_Task t " +
+                "join MBX_MessageItem mi on mi.MessageItemID = t.MessageItemID " +
+                "cross apply (select top 1 dbo.mycid(dr.CreatedBy) OwnerCID from NEO_DynamicReports dr where dr.ReportID = mi.ItemID and dr.active = 1 order by dr.id) o " +
+                "where t.MessageItemID = @messageItemId and t.TaskType = 'DRUpdate' and t.Status <> 'Cancelled' " +
+                "and t.AssignedToUID <> @uid and dbo.mycid(@uid) <> o.OwnerCID and dbo.mycid(t.AssignedToUID) = o.OwnerCID " +
+                "and dbo.MBX_IsTaskAssigneeOwner(t.TaskID, @uid) = 1 " +
+                "and exists (select 1 from Users au where au.UID = t.AssignedToUID and au.Active = 1)",
+                uid, new JObject { ["messageItemId"] = messageItemId }.ToString());
+            return (a.Rows.Count > 0 && !a.Columns.Contains("err") && a.Columns.Contains("AssignedToUID"))
+                ? Convert.ToInt32(a.Rows[0]["AssignedToUID"]) : uid;
         }
 
         private string ReportFor(int messageItemId, int uid)
