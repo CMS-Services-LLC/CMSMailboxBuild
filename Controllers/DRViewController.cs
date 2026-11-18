@@ -53,6 +53,177 @@ namespace CMSMailbox.Controllers
             return Content(JsonConvert.SerializeObject(NameReportColumns(dat)), "application/json");
         }
 
+        // ---- Bulk update (2026-11-18, like CMSNEO's Update Report Data) ---------------------------
+        // Export: your own company's rows as .xlsx (RowID + the report's columns, all Text cells).
+        // Upload: the edited file. Every row is matched by RowID to an active row of THIS report,
+        // must pass RowAccess with IsMine (the same rule as Submit Changes), and only rows whose
+        // values changed are sent to NEO_DynamicRecordUpdate (which re-checks the company and
+        // keeps a history copy). Nothing is added or deleted: rows left out of the file are kept.
+        // (CMSNEO's NEO_UpdateDynamicReports_v4 is deliberately NOT used: it deactivates every row
+        // of the report that isn't in the upload, other companies' rows included.)
+        private const int BulkMaxRows = 500;          // same cap as CMSNEO's Dynamic Reports upload
+        private const long BulkMaxBytes = 10 * 1024 * 1024;
+
+        private class ReportSnapshot
+        {
+            public List<string> Columns = new List<string>();                 // report data columns, header order
+            public List<Dictionary<string, object>> Rows;                     // NameReportColumns output
+            public Dictionary<string, int> IdByRowId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            public Dictionary<int, string> RowIdById = new Dictionary<int, string>();
+            public string Name = "Report";
+        }
+
+        private ReportSnapshot Snapshot(int messageItemId, int uid, string reportId)
+        {
+            var dat = DB.GetDB("exec MBX_GetDRItemReportRows @uid, @messageItemId", uid,
+                new JObject { ["messageItemId"] = messageItemId }.ToString());
+            if (dat.Columns.Contains("err")) return null;
+
+            var snap = new ReportSnapshot { Rows = NameReportColumns(dat) };
+            foreach (var r in snap.Rows)
+                foreach (var k in r.Keys)
+                    if (!MetaColumns.Contains(k) && !snap.Columns.Contains(k)) snap.Columns.Add(k);
+            if (dat.Rows.Count > 0 && dat.Columns.Contains("DR_ReportName") && dat.Rows[0]["DR_ReportName"] != DBNull.Value)
+                snap.Name = dat.Rows[0]["DR_ReportName"].ToString();
+
+            var ids = DB.GetDB("select id, RowID from NEO_DynamicReports where ReportID = @reportid and active = 1", uid,
+                new JObject { ["reportid"] = reportId }.ToString());
+            if (ids.Columns.Contains("RowID"))
+                foreach (DataRow r in ids.Rows)
+                {
+                    if (r["RowID"] == DBNull.Value) continue;
+                    int id = Convert.ToInt32(r["id"]);
+                    string rowId = r["RowID"].ToString();
+                    snap.IdByRowId[rowId] = id;
+                    snap.RowIdById[id] = rowId;
+                }
+            return snap;
+        }
+
+        private static string Cell(object v) =>
+            v == null || v == DBNull.Value ? "" : (v is DateTime dt ? dt.ToString("yyyy-MM-dd") : v.ToString());
+
+        // Header names compare the way NEO_DynamicRecordUpdate matches keys (letters/digits/_ only).
+        private static string NormHeader(string h) =>
+            new string((h ?? "").Trim().Replace(" ", "_").Where(ch => char.IsLetterOrDigit(ch) || ch == '_').ToArray()).ToLowerInvariant();
+
+        [HttpGet("item/{messageItemId:int}/report/export")]
+        public IActionResult ExportForUpdate(int messageItemId)
+        {
+            int uid = CurrentUID();
+            if (uid == 0) return Unauthorized();
+            string reportId = ReportFor(messageItemId, uid);
+            if (reportId == null) return NotFound();
+
+            var snap = Snapshot(messageItemId, uid, reportId);
+            if (snap == null) return NotFound();
+            var mine = snap.Rows.Where(r => r.TryGetValue("xxxIsMine", out var m) && m is bool b && b).ToList();
+            if (mine.Count == 0) return StatusCode(409, new { status = "no_rows_of_yours" });
+
+            var headers = new List<string> { "RowID" };
+            headers.AddRange(snap.Columns);
+            var rows = mine.Select(r =>
+            {
+                int id = Convert.ToInt32(r["xxxID"]);
+                var vals = new List<string> { snap.RowIdById.TryGetValue(id, out var g) ? g : "" };
+                vals.AddRange(snap.Columns.Select(c => r.TryGetValue(c, out var v) ? Cell(v) : ""));
+                return (IList<string>)vals;
+            }).ToList();
+
+            LogAccess(messageItemId, uid, "Served", "DR bulk export (" + rows.Count + " rows)");
+            var safe = new string(snap.Name.Where(ch => char.IsLetterOrDigit(ch) || ch == ' ' || ch == '_' || ch == '-').ToArray()).Trim();
+            return File(XlsxLite.Write(headers, rows, safe), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                (safe == "" ? "Report" : safe) + " - Update.xlsx");
+        }
+
+        [HttpPost("item/{messageItemId:int}/report/bulk")]
+        [RequestSizeLimit(BulkMaxBytes + 64 * 1024)]
+        public IActionResult BulkUpdate(int messageItemId)
+        {
+            int uid = CurrentUID();
+            if (uid == 0) return Unauthorized();
+            string reportId = ReportFor(messageItemId, uid);
+            if (reportId == null) return NotFound();
+            if (Request.Form.Files.Count == 0) return Ok(new { status = "file_required" });
+            var file = Request.Form.Files[0];
+            if (file.Length > BulkMaxBytes) return Ok(new { status = "file_too_large" });
+
+            List<string> fileHeaders; List<Dictionary<string, string>> fileRows;
+            try
+            {
+                using var ms = new MemoryStream(); file.CopyTo(ms);
+                (fileHeaders, fileRows) = XlsxLite.Read(ms.ToArray());
+            }
+            catch { return Ok(new { status = "file_unreadable" }); }
+
+            string rowIdHeader = fileHeaders.FirstOrDefault(h => string.Equals(h, "RowID", StringComparison.OrdinalIgnoreCase));
+            if (rowIdHeader == null) return Ok(new { status = "rowid_required" });
+            if (fileRows.Count > BulkMaxRows) return Ok(new { status = "too_many_rows", max = BulkMaxRows });
+
+            var snap = Snapshot(messageItemId, uid, reportId);
+            if (snap == null) return NotFound();
+
+            // File columns that are report columns (by normalized name); the rest are ignored.
+            var colByNorm = snap.Columns.GroupBy(NormHeader).ToDictionary(g => g.Key, g => g.First());
+            var skipCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "RowID", "Company_Loaded_By", "Status", "Attachments", "FID", "ReportID", "Sorted_By" };
+            var map = new List<(string FileHeader, string Column)>();
+            var ignored = new List<string>();
+            foreach (var h in fileHeaders.Where(h => h != ""))
+            {
+                if (skipCols.Contains(h.Trim()) || skipCols.Contains(h.Trim().Replace(" ", "_"))) continue;
+                if (colByNorm.TryGetValue(NormHeader(h), out var col) && !map.Any(m => m.Column == col)) map.Add((h, col));
+                else ignored.Add(h);
+            }
+            if (map.Count == 0) return Ok(new { status = "no_matching_columns" });
+
+            var rowById = snap.Rows.ToDictionary(r => Convert.ToInt32(r["xxxID"]), r => r);
+            int updated = 0, unchanged = 0, noRowId = 0, notFound = 0, notYours = 0, failed = 0;
+            var problems = new List<string>();
+
+            for (int i = 0; i < fileRows.Count; i++)
+            {
+                var fr = fileRows[i];
+                string line = "row " + (i + 2);
+                string rid = (fr.TryGetValue(rowIdHeader, out var x) ? x : "").Trim();
+                if (rid == "") { noRowId++; continue; }
+                if (!snap.IdByRowId.TryGetValue(rid, out int drid) || !rowById.TryGetValue(drid, out var cur))
+                {
+                    notFound++; if (problems.Count < 10) problems.Add(line + ": RowID not in this report"); continue;
+                }
+
+                var keys = new List<string>(); var vals = new List<string>();
+                foreach (var (fh, col) in map)
+                {
+                    string nv = (fr.TryGetValue(fh, out var v) ? v : "") ?? "";
+                    string ov = cur.TryGetValue(col, out var o) ? Cell(o) : "";
+                    if (!string.Equals(nv.Trim(), ov.Trim(), StringComparison.Ordinal)) { keys.Add(col); vals.Add(nv); }
+                }
+                if (keys.Count == 0) { unchanged++; continue; }
+
+                // Same check as Submit Changes, only for rows that actually change.
+                var access = RowAccess(messageItemId, uid, drid);
+                if (access == null || !access.IsMine)
+                {
+                    notYours++; if (problems.Count < 10) problems.Add(line + ": not your company's row"); continue;
+                }
+
+                var res = DB.GetDB("exec NEO_DynamicRecordUpdate @uid, @fid, @keys, @vals, @reportid", uid,
+                    new JObject
+                    {
+                        ["fid"] = -drid,
+                        ["keys"] = string.Join(",", keys.Select(k => k.Replace(",", ""))),
+                        ["vals"] = string.Join("|", vals.Select(v => v.Replace("|", ""))),
+                        ["reportid"] = ""
+                    }.ToString());
+                if (res.Columns.Contains("err")) { failed++; if (problems.Count < 10) problems.Add(line + ": update failed"); }
+                else updated++;
+            }
+
+            LogAccess(messageItemId, uid, "Served", "DR bulk update: " + updated + " updated, " + unchanged + " unchanged, " +
+                (notFound + notYours + noRowId + failed) + " skipped");
+            return Ok(new { status = "ok", updated, unchanged, noRowId, notFound, notYours, failed, ignored, problems });
+        }
+
         // Header names NEO_GetDynamicReportsALL2 leaves out of the data columns.
         private static readonly HashSet<string> SkippedHeaders = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             { "RowID", "ReportID", "FID", "Company_Loaded_By" };

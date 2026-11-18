@@ -2092,7 +2092,10 @@
                         .concat(cols.indexOf("Attachments") > -1 ? ["Attachments"] : []);
 
                     drTables[messageItemId] = { rows: rows, cols: cols, sortCol: null, desc: false, filters: {}, selected: null };
-                    div.innerHTML = "<p class='hint' style='margin:8px 0 0 0'>Click a row to see its details, notes and attachments. Click a column name to sort, or its &#9662; to filter.</p>" +
+                    // 2026-11-18 bulk update (like CMS's Update Report Data), only when some rows are yours
+                    var hasMine = rows.some(function (r) { return r.xxxIsMine === true || r.xxxIsMine === 1; });
+                    div.innerHTML = (hasMine ? drBulkBarHtml(messageItemId) : "") +
+                        "<p class='hint' style='margin:8px 0 0 0'>Click a row to see its details, notes and attachments. Click a column name to sort, or its &#9662; to filter.</p>" +
                         "<div class='drTableWrap' id='drTableWrap_" + messageItemId + "'></div><div id='drPanel_" + messageItemId + "'></div>";
                     renderDRTable(messageItemId);
                     if (reopenDrid) openDRRow(messageItemId, reopenDrid);
@@ -2449,6 +2452,81 @@
         }
 
         // The server sends the attachment's own filename (Content-Disposition).
+        // ---- Bulk update (2026-11-18): Export for Update -> edit in Excel -> Upload Changes ----------
+        // DRViewController checks every row server-side (RowID in this report, your company's row);
+        // only changed rows are updated, nothing is added or deleted.
+        var drBulkSummary = {};   // messageItemId -> last upload's summary, shown once after the reload
+        function drBulkBarHtml(messageItemId) {
+            var summary = drBulkSummary[messageItemId] || "";
+            delete drBulkSummary[messageItemId];
+            return "<div class='drBulkBar' style='display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:8px 0 4px'>" +
+                "<button type='button' class='textLink' onclick='drBulkExport(" + messageItemId + ")'>Export for Update</button>" +
+                "<button type='button' class='textLink' onclick='document.getElementById(\"drBulkFile_" + messageItemId + "\").click()'>Upload Changes</button>" +
+                "<input type='file' id='drBulkFile_" + messageItemId + "' accept='.xlsx' style='display:none' onchange='drBulkUpload(" + messageItemId + ", this)' />" +
+                "<span class='hint' style='margin:0'>Export your company's rows, edit them in Excel (keep the RowID column and headers), then upload the file.</span>" +
+                "</div><div id='drBulkMsg_" + messageItemId + "'>" + summary + "</div>";
+        }
+
+        function drBulkExport(messageItemId) {
+            var msg = document.getElementById("drBulkMsg_" + messageItemId);
+            msg.innerHTML = "<p class='hint'>Preparing the file ...</p>";
+            api("/item/" + messageItemId + "/report/export")
+                .then(function (r) {
+                    if (r.status === 409) throw new Error("none");
+                    if (!r.ok) throw new Error("denied");
+                    var cd = r.headers.get("Content-Disposition") || "";
+                    var m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(cd);
+                    var name = m ? decodeURIComponent(m[1]) : "Report - Update.xlsx";
+                    return r.blob().then(function (blob) { return { blob: blob, name: name }; });
+                })
+                .then(function (f) {
+                    var url = URL.createObjectURL(f.blob);
+                    var a = document.createElement("a");
+                    a.href = url; a.download = f.name;
+                    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    msg.innerHTML = "";
+                })
+                .catch(function (e) {
+                    msg.innerHTML = "<p class='err'>" + (e.message === "none" ? "None of this report's rows belong to your company, so there is nothing to update." : "The file couldn't be created.") + "</p>";
+                });
+        }
+
+        function drBulkUpload(messageItemId, input) {
+            var file = input.files && input.files[0];
+            input.value = "";
+            if (!file) return;
+            var msg = document.getElementById("drBulkMsg_" + messageItemId);
+            msg.innerHTML = "<p class='hint'>Uploading and checking " + escapeHtml(file.name) + " ...</p>";
+            var fd = new FormData();
+            fd.append("file", file, file.name);
+            api("/item/" + messageItemId + "/report/bulk", { method: "POST", body: fd })
+                .then(function (r) { if (!r.ok) throw new Error("denied"); return r.json(); })
+                .then(function (res) {
+                    var errs = {
+                        file_required: "Choose a file to upload.",
+                        file_too_large: "The file is too large (10 MB at most).",
+                        file_unreadable: "The file couldn't be read. Save it as an Excel workbook (.xlsx) and try again.",
+                        rowid_required: "The file has no RowID column. Use Export for Update to get a file with RowIDs.",
+                        too_many_rows: "The file has more than " + (res.max || 500) + " rows.",
+                        no_matching_columns: "None of the file's column headers match this report's columns."
+                    };
+                    if (res.status !== "ok") { msg.innerHTML = "<p class='err'>" + escapeHtml(errs[res.status] || "The upload failed.") + "</p>"; return; }
+                    var parts = ["<b>" + res.updated + "</b> row" + (res.updated === 1 ? "" : "s") + " updated", res.unchanged + " unchanged"];
+                    var skipped = res.notYours + res.notFound + res.noRowId + res.failed;
+                    if (skipped) parts.push(skipped + " skipped");
+                    var html = "<p class='" + (skipped ? "err" : "hint") + "' style='margin:6px 0'>" + parts.join(", ") + ".";
+                    if (res.noRowId) html += " Rows without a RowID aren't added here; use CMS to add rows.";
+                    if (res.ignored && res.ignored.length) html += " Ignored columns: " + res.ignored.map(escapeHtml).join(", ") + ".";
+                    html += "</p>";
+                    if (res.problems && res.problems.length) html += "<p class='hint' style='margin:0'>" + res.problems.map(escapeHtml).join("<br>") + "</p>";
+                    // Reload the table so the new values show; the bar shows this summary again.
+                    drBulkSummary[messageItemId] = html;
+                    loadDRReport(messageItemId);
+                })
+                .catch(function () { msg.innerHTML = "<p class='err'>The upload failed.</p>"; });
+        }
+
         function downloadDRDoc(messageItemId, drid, fid) {
             api("/item/" + messageItemId + "/report/row/" + drid + "/docs/" + fid)
                 .then(function (r) {
