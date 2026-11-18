@@ -51,7 +51,10 @@ namespace CMSMailbox.Controllers
             // Record History. NEO_IAGetHistory2 only ACS-checks the header part, not the
             // field history itself, so AdHoc pins its mainid to this item's own record
             // (see PinnedToItemRecord).
-            "_IAGetHistory"
+            "_IAGetHistory",
+            // Action Request banner (2026-11-18): what a report/record Action Request points
+            // at (CMS sql/ar_001). Pinned to this item's own record like _IAGetHistory.
+            "_IAGetSystemLinkTarget"
         };
 
         // Actions whose procs don't check the caller's access to the record they're
@@ -65,7 +68,7 @@ namespace CMSMailbox.Controllers
         private static readonly HashSet<string> PinnedToItemRecord = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "_IAGetHistory", "_IAGetJoinRecord", "_IAGetMultiAnswers", "_IAGetSetAprovalBy",
-            "_IAApproveDecline", "_IAOpenCloseRecord"
+            "_IAApproveDecline", "_IAOpenCloseRecord", "_IAGetSystemLinkTarget"
         };
 
         // Write actions — unblocked 2026-09-22 once every one of these procs' own

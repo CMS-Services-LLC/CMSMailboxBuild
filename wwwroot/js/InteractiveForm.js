@@ -2409,8 +2409,11 @@ function ViewDispGO(js, jsVals, JoinedID, JoinedTitle, jsMgtData, jsMultiAnswers
         "|||label|id=IARecordOpenClosed|class=sm padLeft10" +
         "|||label|id=dispButtons|class=padRight10|style=float:right; white-space:nowrap",
         ((SystemLinkFID) ? "div|id=dispSystemLink|Filename:|||label|class=alink padLeft10|onclick=reportLoadFiles(" + SystemLinkFID + ",'" + SystemLinkFilename + "','" + SystemLinkType + "')|Filename:" + SystemLinkFilename : "")
-        
+
     ]);
+    //code:20261118 CMS ar_001 port: an Action Request on a whole dynamic report or another form record
+    //has no SystemLinkFID, so the banner link was missing in the mailbox; look the target up
+    if (!SystemLinkFID && js.MainID > 0 && cloneID == null) mbxShowActionRequestTarget(js.MainID);
 
 
 
@@ -5395,3 +5398,38 @@ function RecordHistory(main, mainid) {
 
 
 
+
+
+//code:20261118 Action Request banner (port of CMS global.js showActionRequestTarget, ar_001).
+//An Action Request on a whole dynamic report or another form record has no SystemLinkFID;
+//NEO_IAGetSystemLinkTarget (pinned to this item's record in IaViewerController) says what it points at.
+//The mailbox has no Dynamic Reports screen, so the link opens CMS in a new tab.
+function mbxShowActionRequestTarget(mainid) {
+    if (!mainid || mainid <= 0) return;
+    getData(null, newFormData("_IAGetSystemLinkTarget", { mainid: mainid }), function (vr) {
+        var js = [];
+        try { js = jparse(vr) || []; } catch (e) { js = []; }
+        var dt = (Array.isArray(js) && js.length > 0) ? js[0] : null;
+        var panel = document.getElementById("dispTopPanner");
+        if (!dt || !panel || document.getElementById("dispSystemLink")) return;
+        var lbl = (dt.ElemType == "Dynamic Report") ? "Dynamic Report" : (dt.ElemType == "Form Record") ? "Form Application" : (dt.ElemType || "");
+        var row = document.createElement("div");
+        row.id = "dispSystemLink";
+        row.appendChild(document.createTextNode(lbl + ":"));
+        var a = document.createElement("label");
+        a.className = "alink padLeft10";
+        a.textContent = dt.ElemName || "";
+        a.title = "Open in CMS";
+        a.onclick = mbxOpenActionRequestTargetInCms;
+        row.appendChild(a);
+        panel.appendChild(row);
+    }, null, true);
+}
+
+function mbxOpenActionRequestTargetInCms() {
+    var w = window.open("", "_blank");
+    fetch("/auth/cms-origin").then(function (r) { return r.json(); }).then(function (o) {
+        if (o && o.origin && w) w.location.href = o.origin;
+        else { if (w) w.close(); xconfirm(null, ["div|Open CMS to view this item."]); }
+    }).catch(function () { if (w) w.close(); xconfirm(null, ["div|Open CMS to view this item."]); });
+}
