@@ -33,14 +33,12 @@
         /* Idle-timeout warning (see the session section of the script). */
         #idleWarning { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 10000; align-items: center; justify-content: center; }
         #idleWarning > div { background: #fff; border-radius: 6px; padding: 22px 26px; text-align: center; box-shadow: 0 4px 20px rgba(0,0,0,0.3); min-width: 300px; }
-        /* 44px top bar + the fixed #siteFooter (60px) at the bottom. */
-        #layout { display: flex; height: calc(100vh - 44px - 60px); }
-        /* Site-wide footer, fixed to the bottom of every screen. Fixed row heights so
-           #layout above can subtract exactly 60px. Fullscreen IA records cover it. */
-        #siteFooter { position: fixed; left: 0; right: 0; bottom: 0; height: 60px; z-index: 50; border-top: 3px solid #015390; box-sizing: border-box; text-align: center; }
-        #siteFooter .sfTop { height: 39px; background: #f8fafc; display: flex; align-items: center; justify-content: center; gap: 8px; }
-        #siteFooter .sfTop span { font-size: 13px; color: #333; font-weight: 600; }
-        #siteFooter .sfTop a { display: inline-block; background: #015390; color: #fff; padding: 5px 16px; font-size: 13px; font-weight: bold; text-decoration: none; border-radius: 4px; }
+        /* 44px top bar + the fixed #siteFooter (18px) at the bottom. */
+        #layout { display: flex; height: calc(100vh - 44px - 18px); }
+        /* Site-wide footer, fixed to the bottom of every screen: just the confidentiality
+           line since the 2026-11-18 redesign (the Log In to Portal bar became the
+           "Open in portal" link in the message header). Fullscreen IA records cover it. */
+        #siteFooter { position: fixed; left: 0; right: 0; bottom: 0; height: 18px; z-index: 50; box-sizing: border-box; text-align: center; }
         #siteFooter .sfBottom { height: 18px; line-height: 18px; background: #015390; color: #fff; font-size: 10px; }
         /* #listPane = folder tabs on top + the scrolling message list below. The width/
            background/border that used to live on #inboxList moved up to the wrapper. */
@@ -93,34 +91,86 @@
            gap. When content is taller than the available height, #messageScroll
            shrinks to what's left and scrolls internally instead, keeping #replyBox
            fully visible below it either way. */
-        #messagePane { flex: 1; display: flex; flex-direction: column; height: 100%; min-width: 0; }
-        #messageScroll { flex: 0 1 auto; min-height: 0; padding: 20px; overflow-y: auto; }
-        #replyBox { flex-shrink: 0; padding: 12px 20px; background: #fff; }
+        /* 2026-11-18 redesign: header (#msgHeader) and composer (#replyBox) are fixed;
+           only #messageScroll (the conversation) scrolls, and it fills the space between. */
+        :root {
+            --mbx-text: #1a2233; --mbx-muted: #5b6678; --mbx-accent: #1f5fd1; --mbx-accent-dark: #184ca8;
+            --mbx-border: #e6e9ef; --mbx-divider: #eef0f4; --mbx-selected: #f7f9fd; --mbx-input-border: #cfd5df;
+            --mbx-disabled-bg: #e3e7ee; --mbx-hover: #f1f3f7;
+        }
+        #messagePane { flex: 1; display: flex; flex-direction: column; height: 100%; min-width: 0; background: #fff; color: var(--mbx-text); }
+        #messageScroll { flex: 1 1 auto; min-height: 0; padding: 20px 32px 16px; overflow-y: auto; }
+        #msgHeader + #messageScroll { padding-top: 4px; }
+        #replyBox { flex-shrink: 0; padding: 16px 32px 24px; background: #fff; }
+        #messagePane a:focus-visible, #messagePane button:focus-visible, #messagePane [tabindex]:focus-visible { outline: 2px solid var(--mbx-accent); outline-offset: 2px; }
+        #msgHeader { flex-shrink: 0; display: flex; align-items: flex-start; gap: 12px; padding: 20px 32px; border-bottom: 1px solid var(--mbx-border); }
+        #msgHeader .mhText { flex: 1; min-width: 0; }
+        #msgHeader h2 { margin: 0; font-size: 20px; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+        #msgHeader .mhSub { margin-top: 4px; font-size: 13px; color: var(--mbx-muted); display: flex; align-items: center; gap: 6px; }
+        #msgHeader .mhActions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+        .iconBtn { width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center; border: none; background: none; border-radius: 8px; color: var(--mbx-muted); cursor: pointer; padding: 0; }
+        .iconBtn:hover { background: var(--mbx-hover); color: var(--mbx-text); }
+        .iconBtn:active { background: var(--mbx-disabled-bg); }
+        .iconBtn svg { width: 20px; height: 20px; }
+        .textLink { color: var(--mbx-accent); text-decoration: none; font-size: 14px; white-space: nowrap; padding: 0 8px; line-height: 44px; }
+        .textLink:hover { text-decoration: underline; }
+        button.textLink { background: none; border: none; cursor: pointer; font: inherit; font-size: 14px; }
         /* Attachments (sql/029) */
         .attachPick { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; color: #2c6bd6; font-size: 13px; margin-right: 8px; }
         .attachChips { display: inline; font-size: 12px; color: #444; }
         .attachChip { display: inline-block; background: #eef2f7; border-radius: 3px; padding: 1px 6px; margin: 2px 4px 2px 0; }
         .attachChip a { color: #b91c1c; cursor: pointer; margin-left: 4px; text-decoration: none; }
-        /* The conversation (sql/030): one card per message, oldest first */
-        #threadArea { margin: 6px 0 14px; }
-        .threadMsg { border: 1px solid #e3e8f0; border-left: 4px solid #e3e8f0; border-radius: 4px; padding: 8px 12px; margin-bottom: 8px; background: #fff; }
-        .threadMsg.current { border-left-color: #2c6bd6; background: #f7faff; }
-        .threadMsg.mine { background: #fbfcfe; }
-        .threadMsg .tmHead { font-size: 12px; color: #6b7280; margin-bottom: 4px; }
-        .threadMsg .tmHead b { color: #1f2937; }
-        .threadMsg .tmBody { white-space: normal; }
-        #threadArea .attFile { display: inline-flex; align-items: center; gap: 6px; border: 1px solid #dde3ec; border-radius: 4px; padding: 4px 8px; margin: 0 6px 6px 0; font-size: 13px; cursor: pointer; color: #1f2937; background: #fbfcfe; }
-        #threadArea .attFile:hover { background: #eef4ff; }
-        .tmTasks { margin-top: 6px; }
-        .tmTask { padding: 5px 10px; margin-bottom: 4px; border-radius: 3px; font-size: 13px; cursor: pointer; background: #fff4e0; color: #8a5300; }
-        .tmTask.done { background: #e6f4ea; color: #1e6b34; }
-        .tmTask.pending { background: #e8f0fe; color: #1a4a9c; }
-        .tmTask.cancelled { background: #f1f3f4; color: #5f6368; }
-        .tmTask:hover { filter: brightness(0.97); }
-        .tmTask .tmOpen { float: right; color: #2c6bd6; }
+        /* The conversation (sql/030): one row per message, newest first, hairline
+           dividers, no card chrome (2026-11-18 redesign). */
+        #threadArea { margin: 0; }
+        .tmDay { font-size: 13px; color: var(--mbx-muted); padding: 16px 0 4px; }
+        .threadMsg { display: flex; gap: 14px; padding: 16px 12px; margin: 0 -12px; border-bottom: 1px solid var(--mbx-divider); }
+        .threadMsg:last-child { border-bottom: none; }
+        .threadMsg.current { background: var(--mbx-selected); box-shadow: inset 3px 0 0 var(--mbx-accent); }
+        .tmAvatar { flex: 0 0 36px; width: 36px; height: 36px; border-radius: 999px; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; background: #e6f2ea; color: #17653a; }
+        .threadMsg.mine .tmAvatar { background: #e4e9f2; color: #3b4a63; }
+        .tmMain { flex: 1; min-width: 0; }
+        .threadMsg .tmHead { display: flex; align-items: baseline; gap: 12px; margin-bottom: 4px; }
+        .tmWho { flex: 1; min-width: 0; font-size: 15px; }
+        .tmWho b { font-weight: 600; }
+        .tmWho .tmMuted, .tmTime { font-size: 13px; color: var(--mbx-muted); font-weight: 400; }
+        .tmTime { white-space: nowrap; }
+        .threadMsg .tmBody { font-size: 15px; line-height: 1.5; overflow-wrap: anywhere; }
+        .tmSkeleton { padding: 16px 0; }
+        .tmSkeleton div { height: 12px; border-radius: 6px; background: var(--mbx-divider); margin: 8px 0; animation: mbxPulse 1.2s ease-in-out infinite; }
+        @keyframes mbxPulse { 50% { opacity: 0.5; } }
+        #threadArea .attFile { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--mbx-border); border-radius: 8px; padding: 4px 8px; margin: 8px 6px 0 0; font: inherit; font-size: 13px; cursor: pointer; color: var(--mbx-text); background: #fff; }
+        #threadArea .attFile:hover { background: var(--mbx-hover); }
+        /* Task rows: [status pill] [title + meta] [Open], under the message that has the task. */
+        .tmTasks { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+        .tmTask { display: flex; align-items: center; gap: 12px; border: 1px solid var(--mbx-border); border-radius: 8px; padding: 8px 4px 8px 12px; background: #fff; }
+        .tmTask .tmTaskText { flex: 1; min-width: 0; }
+        .tmTask .tmTaskTitle { font-size: 14px; font-weight: 500; }
+        .tmTask .tmTaskMeta { font-size: 12px; color: var(--mbx-muted); }
+        .stPill { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; white-space: nowrap; background: #fdf1dc; color: #7a4a00; }
+        .stPill svg { width: 12px; height: 12px; }
+        .stPill.done { background: #e8f5ee; color: #17653a; }
+        .stPill.pending { background: #e8effc; color: #1a4a9c; }
+        .stPill.cancelled { background: #eef0f3; color: #4f5866; }
+        .stPill.overdue { background: #fdeaea; color: #a1261d; }
+        .tmOverdue { color: #a1261d; font-weight: 600; }
         #composeTo { border: 1px solid #ccc; border-radius: 4px; max-height: 180px; overflow-y: auto; padding: 4px 6px; }
         #composeTo label { display: block; font-size: 13px; padding: 2px 0; cursor: pointer; }
-        .itemCard { border: 1px solid #ddd; border-radius: 4px; padding: 10px; margin: 8px 0; background: #fff; }
+        /* The open message's own items (#itemsArea, inside its row in the conversation):
+           a bordered row like .tmTask, title line first, then the status line. */
+        #itemsArea:empty { display: none; }
+        #itemsArea { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+        .itemCard { display: flex; flex-direction: column; border: 1px solid var(--mbx-border); border-radius: 8px; padding: 8px 4px 8px 12px; background: #fff; font-size: 14px; }
+        .itemCard > .mbx-item-line { order: -1; }
+        .itemCard > * { margin-right: 8px; }
+        .itemCard > .mbx-item-line { margin-right: 0; }
+        .itemCard .hint { margin: 4px 0; }
+        .itemCard .taskBanner { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; font-size: 12px; color: var(--mbx-muted); margin-top: 4px; }
+        .itemCard .taskBanner .tbText { flex: 1; min-width: 0; }
+        .itemCard .taskBanner a, .itemCard .taskBanner .linkBtn { color: var(--mbx-accent); cursor: pointer; font-size: 12px; }
+        /* The only filled button in the message view is Send: buttons inside items are outlined. */
+        .itemCard button.primary { background: #fff; color: var(--mbx-accent); border: 1px solid var(--mbx-accent); border-radius: 8px; }
+        .itemCard button.primary:hover:not(:disabled) { background: var(--mbx-selected); }
         /* Dynamic Report viewer (drView*) — see loadDRReport()/openDRRow(). */
         .drTableWrap { max-height: 300px; overflow: auto; border: 1px solid #ddd; margin-top: 8px; }
         .drTable { border-collapse: collapse; font-size: 12px; width: 100%; }
@@ -150,8 +200,24 @@
         table.fieldTable { border-collapse: collapse; width: 100%; margin-top: 8px; }
         table.fieldTable td { border: 1px solid #ddd; padding: 6px 8px; font-size: 13px; }
         table.fieldTable td.k { font-weight: bold; width: 220px; background: #fafafa; }
-        #replyBox { border-top: 1px solid #ddd; }
-        #replyBox textarea, #replyBox input { width: 100%; box-sizing: border-box; padding: 6px; margin: 4px 0; }
+        #replyBox { border-top: 1px solid var(--mbx-border); }
+        .composer { border: 1px solid var(--mbx-input-border); border-radius: 12px; padding: 10px 8px 8px 14px; transition: border-color 0.15s; }
+        .composer:focus-within { border-color: var(--mbx-accent); }
+        .composer .cmpLabel { font-size: 13px; color: var(--mbx-muted); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+        .composer .cmpLabel label { font-weight: 600; color: var(--mbx-text); }
+        .composer .cmpLabel .textLink { font-size: 13px; padding: 0; line-height: normal; }
+        .composer #replySubject { width: 100%; box-sizing: border-box; margin: 8px 0 0; padding: 6px 8px; border: 1px solid var(--mbx-input-border); border-radius: 8px; font: inherit; font-size: 14px; }
+        .composer textarea { width: 100%; box-sizing: border-box; border: none; outline: none; resize: none; padding: 8px 0 0; margin: 0; font: inherit; font-size: 15px; line-height: 1.5; max-height: 220px; overflow-y: auto; background: transparent; color: var(--mbx-text); }
+        .composer .attachChips { display: block; }
+        .composer .cmpActions { display: flex; align-items: center; gap: 8px; }
+        .composer .cmpStatus { flex: 1; min-width: 0; font-size: 13px; color: var(--mbx-muted); margin: 0; }
+        .composer .cmpStatus.err { color: #b42318; }
+        .sendBtn { min-width: 88px; height: 44px; padding: 0 20px; border: none; border-radius: 10px; background: var(--mbx-accent); color: #fff; font: inherit; font-size: 15px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+        .sendBtn:hover:not(:disabled) { background: var(--mbx-accent-dark); }
+        .sendBtn:active:not(:disabled) { transform: translateY(1px); }
+        .sendBtn:disabled { background: var(--mbx-disabled-bg); color: var(--mbx-muted); cursor: not-allowed; }
+        .sendBtn .spin { width: 14px; height: 14px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: mbxSpin 0.8s linear infinite; }
+        @keyframes mbxSpin { to { transform: rotate(360deg); } }
         .err { color: #c0392b; margin: 8px 0; }
         .hint { color: #777; font-size: 13px; }
         button.primary { background: #2c6bd6; color: #fff; border: none; border-radius: 4px; padding: 8px 16px; cursor: pointer; }
@@ -172,7 +238,8 @@
            Open button; the record itself only ever opens fullscreen (mbxOpenItem). */
         .mbx-item-line { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
         .mbx-item-line .mbx-item-details { min-width: 0; }
-        .mbx-item-line .mbx-item-sub { color: #5f6368; font-size: 13px; margin-top: 2px; }
+        .mbx-item-line .mbx-item-sub { color: var(--mbx-muted, #5f6368); font-size: 12px; margin-top: 2px; }
+        .mbx-item-line .mbx-item-details strong { font-weight: 500; }
         /* The fullscreen record's controls, in the reserved 50px strip above it:
            Close without saving + the record's own save buttons (mirrored from inside
            the frame — see mbxSyncSaveButtons), or just Close for an exam. */
@@ -287,10 +354,6 @@
     </div>
 
     <div id="siteFooter">
-        <div class="sfTop">
-            <span>Access full CMS operations &rarr;</span>
-            <a href="https://portal.cms-services.net" target="_blank" rel="noopener">Log In to Portal</a>
-        </div>
         <div class="sfBottom">CMS Secure Email &nbsp;&middot;&nbsp; Confidential &ndash; intended only for the named recipient(s).</div>
     </div>
 
@@ -944,7 +1007,8 @@
             input.value = "";
             renderPickedFiles(which);
             var err = document.getElementById(which === "reply" ? "replyError" : "composeError");
-            if (err) err.innerText = errs.join("; ");
+            if (which === "reply") setReplyStatus(errs.join("; "), errs.length > 0);
+            else if (err) err.innerText = errs.join("; ");
         }
 
         function renderPickedFiles(which) {
@@ -999,39 +1063,94 @@
         // reply still shows the task it's about even when the task wasn't carried onto it
         // (MBX_SendReply only copies a task once it has been started). Clicking opens the
         // message the task is on. The open message's own tasks are in #itemsArea instead.
+        // ---- 2026-11-18 message view redesign helpers ----
+        // MBX_* DTCreated is a SQL datetime from getdate() on Azure, i.e. UTC with no offset
+        // in the JSON. new Date() would read it as LOCAL time (so 7:34 PM Central showed as
+        // 1:34 AM); mark it UTC so every date shows in the viewer's own time zone.
+        function mbxDate(v) {
+            if (v instanceof Date) return v;
+            var s = String(v || "");
+            if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(s)) s += "Z";
+            return new Date(s);
+        }
+        function mbxFullTime(v) {
+            return mbxDate(v).toLocaleString([], { year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit", timeZoneName: "short" });
+        }
+        // "Re: Re: Welcome" -> "Welcome" (the header title, and the base of a reply's subject).
+        function stripRe(s) { return String(s || "").replace(/^(\s*re\s*:\s*)+/i, ""); }
+        function initialsOf(name) {
+            var parts = String(name || "").trim().split(/\s+/).filter(Boolean);
+            return ((parts[0] || "?").charAt(0) + (parts.length > 1 ? parts[parts.length - 1].charAt(0) : "")).toUpperCase();
+        }
+        var MBX_ICONS = {
+            archive: "<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round' aria-hidden='true'><rect x='3' y='4' width='18' height='4' rx='1'/><path d='M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8'/><path d='M10 12h4'/></svg>",
+            unarchive: "<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round' aria-hidden='true'><path d='M4 13h4l2 3h4l2-3h4'/><path d='M4 13l2-8h12l2 8v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z'/></svg>",
+            forward: "<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round' aria-hidden='true'><path d='M14 5l7 7-7 7'/><path d='M21 12H9a6 6 0 0 0-6 6v1'/></svg>",
+            attach: "<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round' aria-hidden='true'><path d='M21 11.5l-8.6 8.6a5 5 0 0 1-7.1-7.1l8.6-8.6a3.3 3.3 0 0 1 4.7 4.7l-8.6 8.6a1.7 1.7 0 0 1-2.4-2.4l7.9-7.9'/></svg>",
+            lock: "<svg width='13' height='13' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' aria-hidden='true'><rect x='5' y='11' width='14' height='9' rx='2'/><path d='M8 11V8a4 4 0 0 1 8 0v3'/></svg>",
+            check: "<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='3' stroke-linecap='round' stroke-linejoin='round' aria-hidden='true'><path d='M5 12.5l4.5 4.5L19 7.5'/></svg>"
+        };
+        // A task's status as a pill: text + icon, never colour alone. due = SQL date string or empty.
+        function statusPillHtml(status, due) {
+            var st = status || "Open";
+            var label = { Saved: "Saved", Cancelled: "Cancelled", "Pending Review": "Pending review" }[st] || st;
+            var finished = st === "Completed" || st === "Cancelled";
+            var overdue = !finished && due && String(due).substring(0, 10) < new Date().toISOString().substring(0, 10);
+            var cls = st === "Completed" ? "done" : st === "Pending Review" ? "pending" : st === "Cancelled" ? "cancelled" : overdue ? "overdue" : "open";
+            if (overdue && st === "Open") label = "Overdue";
+            return "<span class='stPill " + cls + "'>" + (st === "Completed" ? MBX_ICONS.check : "") + escapeHtml(label) + "</span>";
+        }
+        function dueHtml(due, status) {
+            if (!due || status === "Completed" || status === "Cancelled") return "";
+            var d = String(due).substring(0, 10);
+            return d < new Date().toISOString().substring(0, 10)
+                ? " &middot; <span class='tmOverdue'>Overdue, due " + escapeHtml(d) + "</span>"
+                : " &middot; Due " + escapeHtml(d);
+        }
+
         function threadTasksHtml(tasks) {
             if (!tasks || !tasks.length) return "";
-            var what = { FormApplication: "Form Application", DynamicReport: "Dynamic Report", Exam: "Exam" };
+            var what = { FormApplication: "Form application", DynamicReport: "Dynamic report", Exam: "Exam" };
             return "<div class='tmTasks'>" + tasks.map(function (t) {
                 var st = t.TaskStatus || "Open";
-                var cls = st === "Completed" ? "done" : st === "Pending Review" ? "pending" : st === "Cancelled" ? "cancelled" : "open";
-                var label = { Saved: "Saved - waiting for Save for Use", Cancelled: "Cancelled by the sender" }[st] || st;
                 var name = t.TaskType === "Exam" && t.ExamName ? t.ExamName : (t.ItemLabel || what[t.TaskType] || "Task");
-                var due = (t.DueDate && st !== "Completed" && st !== "Cancelled") ? " &middot; Due " + escapeHtml(String(t.DueDate).substring(0, 10)) : "";
-                return "<div class='tmTask " + cls + "' title='Open the message with this task' onclick='openMessage(" + t.MessageID + ")'>" +
-                    "<b>" + escapeHtml(what[t.TaskType] || "Task") + " task:</b> " + escapeHtml(name) + due + " &middot; <b>" + escapeHtml(label) + "</b>" +
-                    " <span class='tmOpen'>Open &rsaquo;</span></div>";
+                var meta = escapeHtml(what[t.TaskType] || "Task") + (st === "Saved" ? " &middot; waiting for Save for Use" : "") + dueHtml(t.DueDate, st);
+                return "<div class='tmTask'>" + statusPillHtml(st, t.DueDate) +
+                    "<div class='tmTaskText'><div class='tmTaskTitle'>" + escapeHtml(name) + "</div><div class='tmTaskMeta'>" + meta + "</div></div>" +
+                    "<button type='button' class='textLink' title='Open the message with this task' onclick='openMessage(" + t.MessageID + ")'>Open</button></div>";
             }).join("") + "</div>";
         }
 
         function threadCardHtml(m, atts, isCurrent, tasks) {
-            var html = "<div class='threadMsg" + (isCurrent ? " current" : "") + (m.FromMe ? " mine" : "") + "' data-thread-id='" + m.MessageID + "'>" +
-                "<div class='tmHead'><b>" + escapeHtml(m.FromMe ? "You" : m.FromName) + "</b>" +
-                (m.FromMe ? "" : " (" + escapeHtml(m.FromCompany || "") + ")") +
-                " &rarr; " + escapeHtml(m.ToNames || "") + " &middot; " + new Date(m.DTCreated).toLocaleString() +
-                (isCurrent ? " &middot; <i>this message</i>" : "") + "</div>" +
+            var name = m.FromMe ? "You" : (m.FromName || "");
+            var when = mbxDate(m.DTCreated);
+            var iso = isNaN(when) ? "" : when.toISOString();
+            var html = "<div class='threadMsg" + (isCurrent ? " current" : "") + (m.FromMe ? " mine" : "") + "' data-thread-id='" + m.MessageID + "'" +
+                (isCurrent ? " aria-current='true'" : "") + ">" +
+                "<div class='tmAvatar' aria-hidden='true'>" + escapeHtml(initialsOf(m.FromName || name)) + "</div><div class='tmMain'>" +
+                "<div class='tmHead'><div class='tmWho'><b>" + escapeHtml(name) + "</b>" +
+                (!m.FromMe && m.FromCompany ? " <span class='tmMuted'>" + escapeHtml(m.FromCompany) + "</span>" : "") +
+                (m.ToNames ? " <span class='tmMuted'>to " + escapeHtml(m.ToNames) + "</span>" : "") + "</div>" +
+                "<time class='tmTime' datetime='" + iso + "' title='" + escapeHtml(mbxFullTime(when)) + "'>" +
+                escapeHtml(when.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })) + "</time></div>" +
                 "<div class='tmBody'>" + (escapeHtml(m.Body || "").replace(/\n/g, "<br/>") || "<span class='hint'>(no text)</span>") + "</div>";
             if (!isCurrent) html += threadTasksHtml(tasks);
             if (atts.length) {
-                html += "<div style='margin-top:6px'>" + atts.map(function (a) {
-                    return "<span class='attFile' title='Download' onclick='downloadAttachment(" + a.AttachmentID + ", " +
-                        escapeHtml(JSON.stringify(a.FileName)) + ")'>&#128206; " + escapeHtml(a.FileName) + " (" + fileSizeText(a.SizeBytes) + ")</span>";
+                html += "<div>" + atts.map(function (a) {
+                    return "<button type='button' class='attFile' title='Download' onclick='downloadAttachment(" + a.AttachmentID + ", " +
+                        escapeHtml(JSON.stringify(a.FileName)) + ")'><span aria-hidden='true'>&#128206;</span> " + escapeHtml(a.FileName) + " (" + fileSizeText(a.SizeBytes) + ")</button>";
                 }).join("") + "</div>";
             }
-            return html + "</div>";
+            // The open message's own items (#itemsArea) are moved in here (renderMessage, loadThread).
+            return html + "</div></div>";
+        }
+
+        function dayHeaderHtml(d) {
+            return "<div class='tmDay'>" + escapeHtml(d.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })) + "</div>";
         }
 
         function loadThread(messageId) {
+            var dropSkeleton = function () { var sk = document.querySelector("#threadArea .tmSkeleton"); if (sk) sk.remove(); };
             api("/inbox/" + messageId + "/thread")
                 .then(function (r) { if (!r.ok) throw new Error("no thread"); return r.json(); })
                 .then(function (res) {
@@ -1041,16 +1160,25 @@
                     var msgs = JSON.parse(res.messages), atts = JSON.parse(res.attachments);
                     var tasks = JSON.parse(res.tasks || "[]");
                     // Newest first.
-                    msgs.sort(function (a, b) { return (new Date(b.DTCreated) - new Date(a.DTCreated)) || (b.MessageID - a.MessageID); });
-                    area.innerHTML = (msgs.length > 1 ? "<div class='hint' style='margin-bottom:6px'>Conversation &middot; " + msgs.length + " messages</div>" : "") +
-                        msgs.map(function (m) {
-                            return threadCardHtml(m, atts.filter(function (a) { return a.MessageID === m.MessageID; }), m.MessageID === messageId,
-                                tasks.filter(function (t) { return t.MessageID === m.MessageID; }));
-                        }).join("");
-                    var cur = area.querySelector(".threadMsg.current");
-                    if (cur && msgs.length > 1) cur.scrollIntoView({ block: "nearest" });
+                    msgs.sort(function (a, b) { return (mbxDate(b.DTCreated) - mbxDate(a.DTCreated)) || (b.MessageID - a.MessageID); });
+                    // Keep the open message's items (they may hold an open record) across the re-render.
+                    var items = document.getElementById("itemsArea");
+                    if (items) items.remove();
+                    var lastDay = "";
+                    area.innerHTML = msgs.map(function (m) {
+                        var d = mbxDate(m.DTCreated), day = d.toDateString();
+                        var head = day !== lastDay ? dayHeaderHtml(d) : "";
+                        lastDay = day;
+                        return head + threadCardHtml(m, atts.filter(function (a) { return a.MessageID === m.MessageID; }), m.MessageID === messageId,
+                            tasks.filter(function (t) { return t.MessageID === m.MessageID; }));
+                    }).join("");
+                    var cur = area.querySelector(".threadMsg.current .tmMain");
+                    if (items) (cur || area).appendChild(items);
+                    var count = document.getElementById("msgCount");
+                    if (count) count.textContent = " · " + msgs.length + (msgs.length === 1 ? " message" : " messages");
+                    if (cur && msgs.length > 1) cur.parentNode.scrollIntoView({ block: "nearest" });
                 })
-                .catch(function () { /* the opened message alone stays shown */ });
+                .catch(function () { dropSkeleton(); /* the opened message alone stays shown */ });
         }
 
         function downloadAttachment(id, name) {
@@ -1228,7 +1356,7 @@
                 div.innerHTML = (selectable ? "<input type='checkbox' class='msgChk' title='Select'" + (selectedIds[m.MessageID] ? " checked" : "") + " />" : "") +
                     "<div class='msgBody'><span class='subj'>" + clip + escapeHtml(m.Subject) + tag + "</span>" +
                     "<span class='meta'>" + who + " &middot; " +
-                    new Date(m.DTCreated).toLocaleString() + "</span></div>";
+                    mbxDate(m.DTCreated).toLocaleString([], { year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" }) + "</span></div>";
                 if (selectable) {
                     var chk = div.querySelector(".msgChk");
                     chk.onclick = function (e) {
@@ -1340,8 +1468,18 @@
             var assigneeShare = msg.AssigneeSharedAccess || "";
             var worksAsRecipient = isRecipient || !!assigneeShare;
 
-            var html = "<div id='messageScroll'>";
-            html += "<h3>" + escapeHtml(msg.Subject) + "</h3>";
+            // 2026-11-18 redesign: fixed header (title, secure-message line, Archive / Forward
+            // icons for a recipient as before, and the portal link that replaced the footer bar).
+            var html = "<div id='msgHeader'><div class='mhText'><h2>" + escapeHtml(stripRe(msg.Subject) || msg.Subject || "(no subject)") + "</h2>" +
+                "<div class='mhSub'>" + MBX_ICONS.lock + "<span>Secure message<span id='msgCount'></span></span></div></div>" +
+                "<div class='mhActions'>" +
+                (isRecipient
+                    ? "<button type='button' class='iconBtn' onclick='archiveCurrent()' aria-label='" + (currentArchived ? "Move to Inbox" : "Archive") + "' title='" + (currentArchived ? "Move to Inbox" : "Archive") + "'>" + (currentArchived ? MBX_ICONS.unarchive : MBX_ICONS.archive) + "</button>" +
+                      "<button type='button' class='iconBtn' onclick='openForward(" + msg.MessageID + ")' aria-label='Forward' title='Forward: send a copy to colleagues in your company'>" + MBX_ICONS.forward + "</button>"
+                    : "") +
+                "<a class='textLink' href='https://portal.cms-services.net' target='_blank' rel='noopener'>Open in portal &rsaquo;</a>" +
+                "</div></div>";
+            html += "<div id='messageScroll'>";
             // A colleague a task here was shared with (sql/026): they see it as its sender does.
             // sql/041: a Global Administrator of the assigner's or assignee's company (no real share).
             if (msg.AdminAccess && (msg.SharedAccess || assigneeShare)) {
@@ -1364,24 +1502,30 @@
             html += "<div id='threadArea'>" + threadCardHtml({
                 MessageID: msg.MessageID, FromName: msg.FromName, FromCompany: msg.FromCompany,
                 ToNames: msg.ToNames, DTCreated: msg.DTCreated, Body: msg.Body, FromMe: !worksAsRecipient && !msg.SharedAccess
-            }, [], true) + "</div>";
-            html += "<div id='itemsArea'></div>";
+            }, [], true) + "<div class='tmSkeleton' aria-hidden='true'><div style='width:40%'></div><div style='width:85%'></div><div style='width:65%'></div></div></div>";
             html += "</div>";
             // Deliberately OUTSIDE #messageScroll, as a fixed sibling — see the
             // #replyBox/#messageScroll CSS comment above.
             if (isRecipient) {
-                html += "<div id='replyBox'>" +
-                    "<input id='replySubject' placeholder='Subject' value='Re: " + escapeHtml(msg.Subject) + "' />" +
-                    "<textarea id='replyBody' placeholder='Message' rows='4' oninput='updateReplyButton()'></textarea>" +
-                    "<div style='margin:4px 0'><label class='attachPick'>&#128206; Attach<input type='file' multiple style='display:none' onchange='addPickedFiles(this, \"reply\")' /></label>" +
-                    "<span class='attachChips' id='replyFiles'></span></div>" +
-                    "<div class='err' id='replyError'></div>" +
-                    "<button class='primary' id='replySendBtn' onclick='sendReply()' disabled>Send Reply</button> " +
-                    "<button class='secondary' onclick='archiveCurrent()'>" + (currentArchived ? "Move to Inbox" : "Archive") + "</button> " +
-                    "<button class='secondary' onclick='openForward(" + msg.MessageID + ")' title='Send a copy to colleagues in your company'>Forward</button>" +
-                    "</div>";
+                html += "<div id='replyBox'><div class='composer'>" +
+                    "<div class='cmpLabel'><label for='replyBody'>Reply to " + escapeHtml(msg.FromName || "sender") + "</label>" +
+                    "<span aria-hidden='true'>&middot;</span><button type='button' class='textLink' id='replySubjectToggle' aria-expanded='false' aria-controls='replySubject' onclick='toggleReplySubject()'>Edit subject</button></div>" +
+                    "<input id='replySubject' aria-label='Subject' hidden value='Re: " + escapeHtml(stripRe(msg.Subject)) + "' />" +
+                    "<textarea id='replyBody' placeholder='Write a reply…' rows='2' oninput='updateReplyButton(); growReplyBody()' onkeydown='if ((event.ctrlKey || event.metaKey) && event.key === \"Enter\") { event.preventDefault(); sendReply(); }'></textarea>" +
+                    "<span class='attachChips' id='replyFiles'></span>" +
+                    "<div class='cmpActions'>" +
+                    "<button type='button' class='iconBtn' aria-label='Attach files' title='Attach files' onclick='document.getElementById(\"replyFileInput\").click()'>" + MBX_ICONS.attach + "</button>" +
+                    "<input type='file' id='replyFileInput' multiple hidden onchange='addPickedFiles(this, \"reply\")' />" +
+                    "<div class='cmpStatus' id='replyError' role='status' aria-live='polite'></div>" +
+                    "<button type='button' class='sendBtn' id='replySendBtn' onclick='sendReply()' disabled title='Send (Ctrl+Enter)'>Send</button>" +
+                    "</div></div></div>";
             }
             pane.innerHTML = html;
+            // The open message's own items live inside its row in the conversation.
+            var curMain = pane.querySelector(".threadMsg.current .tmMain");
+            var itemsDiv = document.createElement("div");
+            itemsDiv.id = "itemsArea";
+            (curMain || document.getElementById("messageScroll")).appendChild(itemsDiv);
             pickedFiles.reply = [];
             loadThread(msg.MessageID);
 
@@ -1528,12 +1672,9 @@
             if (!item.OriginTaskStatus || item.ReviewTaskItemID) return "";
             var st = item.OriginTaskStatus;
             var done = st === "Completed", pending = st === "Pending Review", cancelled = st === "Cancelled";
-            var label = { Saved: "Saved - waiting for Save for Use" }[st] || st;
-            var what = { FormApplication: "Form Application task", DynamicReport: "Dynamic Report task", Exam: "Exam task" }[item.OriginTaskType] || "Task";
-            var due = (item.OriginDueDate && !done && !cancelled) ? " &middot; Due " + escapeHtml(String(item.OriginDueDate).substring(0, 10)) : "";
-            return "<div class='taskBanner' style='padding:6px 10px;margin-bottom:8px;border-radius:3px;" +
-                (cancelled ? "background:#f1f3f4;color:#5f6368" : done ? "background:#e6f4ea;color:#1e6b34" : pending ? "background:#e8f0fe;color:#1a4a9c" : "background:#fff4e0;color:#8a5300") + "'>" +
-                "<b>" + what + ":</b> <b>" + escapeHtml(label) + "</b>" + due + "</div>";
+            var what = { FormApplication: "Form application task", DynamicReport: "Dynamic report task", Exam: "Exam task" }[item.OriginTaskType] || "Task";
+            return "<div class='taskBanner'>" + statusPillHtml(st, item.OriginDueDate) + "<span class='tbText'>" + what +
+                (st === "Saved" ? " &middot; waiting for Save for Use" : "") + dueHtml(item.OriginDueDate, st) + "</span></div>";
         }
 
         // On a reply's copy of a finished record/report (sql/014): if the task it came
@@ -1543,8 +1684,8 @@
         function reviewBarHtml(item) {
             if (!item.ReviewTaskItemID) return "";
             var id = item.MessageItemID;
-            return "<div class='taskBanner' id='reviewBar_" + id + "' style='padding:6px 10px;margin-bottom:8px;border-radius:3px;background:#e8f0fe;color:#1a4a9c'>" +
-                "<b>Task:</b> finished, <b>Pending Review</b> &middot; check it, then " +
+            return "<div class='taskBanner' id='reviewBar_" + id + "'>" + statusPillHtml("Pending Review") +
+                "<span class='tbText'>Task finished &middot; check it, then</span> " +
                 "<button class='primary' id='reviewReplyBtn_" + id + "' onclick='reviewFromReply(" + item.ReviewTaskItemID + "," + id + ")'>Mark as Completed</button> " +
                 "<span class='err' id='reviewReplyMsg_" + id + "'></span></div>";
         }
@@ -1558,9 +1699,7 @@
                     if (r.status === 401) { logout(); throw new Error("unauthorized"); }
                     if (!r.ok) throw new Error("refused");
                     var bar = document.getElementById("reviewBar_" + itemId);
-                    bar.style.background = "#e6f4ea";
-                    bar.style.color = "#1e6b34";
-                    bar.innerHTML = "<b>Task:</b> <b>Completed</b> &middot; you marked it completed.";
+                    bar.innerHTML = statusPillHtml("Completed") + "<span class='tbText'>You marked this task completed.</span>";
                 })
                 .catch(function () {
                     btn.disabled = false;
@@ -1679,14 +1818,15 @@
             }[item.TaskStatus] || "Open";
             // DueDate is a SQL date (serialized as midnight) — show the date part as-is
             // rather than letting a timezone conversion shift it a day.
-            var due = (item.DueDate && !cancelled) ? " &middot; Due " + escapeHtml(String(item.DueDate).substring(0, 10)) : "";
+            var due = cancelled ? "" : dueHtml(item.DueDate, done ? "Completed" : "");
             // The task's own assignee can share it with colleagues in their company (sql/028).
             var share = (item.IsAssigneeOwner && !cancelled)
-                ? " <a style='float:right;cursor:pointer;color:#2c6bd6;font-weight:normal' onclick='openTaskShare(" + item.TaskID + ")'>Share with a colleague</a>"
+                ? "<button type='button' class='linkBtn' onclick='openTaskShare(" + item.TaskID + ")'>Share with a colleague</button>"
                 : "";
-            return "<div class='taskBanner' style='padding:6px 10px;margin-bottom:8px;border-radius:3px;" +
-                (cancelled ? "background:#f1f3f4;color:#5f6368" : done ? "background:#e6f4ea;color:#1e6b34" : pending ? "background:#e8f0fe;color:#1a4a9c" : "background:#fff4e0;color:#8a5300") + "'>" +
-                share + "<b>Task:</b> " + what + due + " &middot; <b>" + statusText + "</b></div>";
+            // 2026-11-18 redesign: status pill + instruction as one muted line (was a tinted bar).
+            var pill = formNotCreated ? "<span class='stPill'>" + escapeHtml(statusText) + "</span>" : statusPillHtml(item.TaskStatus, done ? "" : item.DueDate);
+            return "<div class='taskBanner'>" + pill + "<span class='tbText'>" + what + due +
+                (item.TaskStatus === "Saved" ? " &middot; waiting for Save for Use" : "") + "</span>" + share + "</div>";
         }
 
         // ---- Dynamic Report viewer (sql/010, DRViewController) ----------------
@@ -1724,7 +1864,7 @@
             return "<div class='mbx-item-line' data-kind='" + kind + "' data-msg-item='" + item.MessageItemID + "' data-title='" + escapeHtml(title) + "'>" +
                 "<div class='mbx-item-details'><strong>" + escapeHtml(title) + "</strong>" +
                 (sub ? "<div class='mbx-item-sub'>" + sub + "</div>" : "") + "</div>" +
-                (canOpen ? "<button class='primary' onclick='mbxOpenItem(this)'>Open</button>" : "") +
+                (canOpen ? "<button type='button' class='textLink' onclick='mbxOpenItem(this)'>Open</button>" : "") +
                 "</div>";
         }
 
@@ -2243,7 +2383,32 @@
         // (whitespace doesn't count).
         function updateReplyButton() {
             var btn = document.getElementById("replySendBtn");
-            if (btn) btn.disabled = document.getElementById("replyBody").value.trim() === "";
+            if (btn && !replySending) btn.disabled = document.getElementById("replyBody").value.trim() === "";
+        }
+
+        // 2026-11-18 redesign: the reply box starts at 2 rows and grows with its text up
+        // to the CSS max-height, then scrolls.
+        function growReplyBody() {
+            var ta = document.getElementById("replyBody");
+            if (!ta) return;
+            ta.style.height = "auto";
+            ta.style.height = Math.min(ta.scrollHeight, 220) + "px";
+        }
+
+        // "Edit subject" shows / hides the reply's subject (it defaults to "Re: <subject>").
+        function toggleReplySubject() {
+            var inp = document.getElementById("replySubject"), link = document.getElementById("replySubjectToggle");
+            if (!inp) return;
+            inp.hidden = !inp.hidden;
+            if (link) { link.setAttribute("aria-expanded", String(!inp.hidden)); link.textContent = inp.hidden ? "Edit subject" : "Hide subject"; }
+            if (!inp.hidden) inp.focus();
+        }
+
+        function setReplyStatus(text, isError) {
+            var el = document.getElementById("replyError");
+            if (!el) return;
+            el.className = "cmpStatus" + (isError ? " err" : "");
+            el.textContent = text;
         }
 
         // 2026-11-16: a tester's reply was saved 7 times (8:47:17-8:47:21): the button stayed enabled
@@ -2251,18 +2416,17 @@
         // Now one send at a time: the button locks ("Sending...") until the reply is saved or fails.
         var replySending = false;
         function sendReply() {
-            var errDiv = document.getElementById("replyError");
             if (replySending) return;
             if (document.getElementById("replyBody").value.trim() === "") return;
             var btn = document.getElementById("replySendBtn");
             var unlock = function () {
                 replySending = false;
-                if (btn) btn.textContent = "Send Reply";
+                if (btn) btn.textContent = "Send";
                 updateReplyButton();
             };
             replySending = true;
-            if (btn) { btn.disabled = true; btn.textContent = "Sending..."; }
-            errDiv.innerText = "";
+            if (btn) { btn.disabled = true; btn.innerHTML = "<span class='spin' aria-hidden='true'></span>Sending"; }
+            setReplyStatus("");
             var body = {
                 Subject: document.getElementById("replySubject").value,
                 Body: document.getElementById("replyBody").value
@@ -2282,17 +2446,19 @@
                     var newId = rows.length ? rows[0].MessageID : null;
                     var files = pickedFiles.reply || [];
                     document.getElementById("replyBody").value = "";
+                    growReplyBody();
                     unlock();   // box is empty now, so the button stays disabled until something is typed
-                    if (!newId || !files.length) { errDiv.innerText = "Reply sent."; loadInbox(); return; }
-                    errDiv.innerText = "Reply sent. Uploading " + files.length + " attachment(s)...";
+                    if (!newId || !files.length) { setReplyStatus("Reply sent."); loadInbox(); return; }
+                    setReplyStatus("Reply sent. Uploading " + files.length + " attachment(s)...");
                     return uploadAttachments(newId, files).then(function (failed) {
                         pickedFiles.reply = [];
                         renderPickedFiles("reply");
-                        errDiv.innerText = failed.length ? "Reply sent, but these attachments failed: " + failed.join("; ") : "Reply sent with " + files.length + " attachment(s).";
+                        if (failed.length) setReplyStatus("Reply sent, but these attachments failed: " + failed.join("; "), true);
+                        else setReplyStatus("Reply sent with " + files.length + " attachment(s).");
                         loadInbox();
                     });
                 })
-                .catch(function () { unlock(); errDiv.innerText = "Could not send reply."; });
+                .catch(function () { unlock(); setReplyStatus("Could not send reply. Try again.", true); });
         }
 
         // Toggles: Archive from the Inbox, Move to Inbox from the Archived folder
