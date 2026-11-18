@@ -1276,7 +1276,8 @@
             return html + "</div></div>";
         }
 
-        function loadThread(messageId) {
+        // showNewest (2026-11-18): after Send, scroll to the top, where the new reply now sits (newest first).
+        function loadThread(messageId, showNewest) {
             var dropSkeleton = function () { var sk = document.querySelector("#threadArea .tmSkeleton"); if (sk) sk.remove(); };
             api("/inbox/" + messageId + "/thread")
                 .then(function (r) { if (!r.ok) throw new Error("no thread"); return r.json(); })
@@ -1308,7 +1309,9 @@
                     var count = document.getElementById("msgCount");
                     if (count) count.textContent = msgs.length + (msgs.length === 1 ? " message" : " messages");
                     var cur = area.querySelector(".threadMsg.current");
-                    if (cur && msgs.length > 1) cur.scrollIntoView({ block: "nearest" });
+                    var sc = document.getElementById("messageScroll");
+                    if (showNewest && sc) sc.scrollTop = 0;
+                    else if (cur && msgs.length > 1) cur.scrollIntoView({ block: "nearest" });
                 })
                 .catch(function () { dropSkeleton(); /* the opened message alone stays shown */ });
         }
@@ -2807,13 +2810,17 @@
                     document.getElementById("replyBody").value = "";
                     growReplyBody();
                     unlock();   // box is empty now, so the button stays disabled until something is typed
-                    if (!newId || !files.length) { setReplyStatus("Reply sent."); loadInbox(); return; }
+                    // 2026-11-18: show the reply in the conversation right away (it used to appear only
+                    // after opening the message again)
+                    var sentOn = currentMessageId;
+                    if (!newId || !files.length) { setReplyStatus("Reply sent."); loadThread(sentOn, true); loadInbox(); return; }
                     setReplyStatus("Reply sent. Uploading " + files.length + " attachment(s)...");
                     return uploadAttachments(newId, files).then(function (failed) {
                         pickedFiles.reply = [];
                         renderPickedFiles("reply");
                         if (failed.length) setReplyStatus("Reply sent, but these attachments failed: " + failed.join("; "), true);
                         else setReplyStatus("Reply sent with " + files.length + " attachment(s).");
+                        loadThread(sentOn, true);
                         loadInbox();
                     });
                 })
