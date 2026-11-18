@@ -93,21 +93,41 @@
            fully visible below it either way. */
         /* 2026-11-18 redesign: header (#msgHeader) and composer (#replyBox) are fixed;
            only #messageScroll (the conversation) scrolls, and it fills the space between. */
+        /* Brand steel blue sampled from the CMS Services logo (images/logo_1704.png). */
         :root {
-            --mbx-text: #1a2233; --mbx-muted: #5b6678; --mbx-accent: #1f5fd1; --mbx-accent-dark: #184ca8;
-            --mbx-border: #e6e9ef; --mbx-divider: #eef0f4; --mbx-selected: #f7f9fd; --mbx-input-border: #cfd5df;
-            --mbx-disabled-bg: #e3e7ee; --mbx-hover: #f1f3f7;
+            --mbx-text: #1a2233; --mbx-muted: #5b6678; --mbx-accent: #3d719c; --mbx-accent-dark: #315e83; --mbx-accent-deep: #254b69;
+            --mbx-border: #dfe5ec; --mbx-divider: #ebeff3; --mbx-selected: #eef5fa; --mbx-input-border: #cbd5df;
+            --mbx-disabled-bg: #e3e7ee; --mbx-hover: #f1f4f7;
+            --mbx-success-bg: #e8f4eb; --mbx-success-text: #176137; --mbx-pending-bg: #fff3df; --mbx-pending-text: #855400;
         }
         #messagePane { flex: 1; display: flex; flex-direction: column; height: 100%; min-width: 0; background: #fff; color: var(--mbx-text); }
-        #messageScroll { flex: 1 1 auto; min-height: 0; padding: 20px 32px 16px; overflow-y: auto; }
-        #msgHeader + #messageScroll { padding-top: 4px; }
-        #replyBox { flex-shrink: 0; padding: 16px 32px 24px; background: #fff; }
-        #messagePane a:focus-visible, #messagePane button:focus-visible, #messagePane [tabindex]:focus-visible { outline: 2px solid var(--mbx-accent); outline-offset: 2px; }
-        #msgHeader { flex-shrink: 0; display: flex; align-items: flex-start; gap: 12px; padding: 20px 32px; border-bottom: 1px solid var(--mbx-border); }
-        #msgHeader .mhText { flex: 1; min-width: 0; }
-        #msgHeader h2 { margin: 0; font-size: 20px; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
-        #msgHeader .mhSub { margin-top: 4px; font-size: 13px; color: var(--mbx-muted); display: flex; align-items: center; gap: 6px; }
-        #msgHeader .mhActions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+        #messageScroll { flex: 1 1 auto; min-height: 0; padding: 4px 32px 16px; overflow-y: auto; }
+        #replyBox { flex-shrink: 0; padding: 12px 32px 20px; background: #fff; }
+        #messagePane a:focus-visible, #messagePane button:focus-visible, #messagePane input:focus-visible, #messagePane [tabindex]:focus-visible { outline: 2px solid var(--mbx-accent); outline-offset: 2px; }
+        /* Header: logo left; Archive / Forward / More top right with the secure-message line under
+           them; then the always-visible Subject row and a hairline. */
+        #msgHeader { flex-shrink: 0; padding: 16px 32px 0; }
+        #msgHeader .mhTop { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+        #msgHeader .mhLogo { height: 58px; width: auto; max-width: 100%; display: block; }
+        #msgHeader .mhRight { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; margin-left: auto; }
+        #msgHeader .mhActions { display: flex; align-items: center; gap: 2px; }
+        #msgHeader .mhSub { font-size: 13px; color: var(--mbx-muted); display: flex; align-items: center; gap: 6px; padding-right: 8px; white-space: nowrap; }
+        #msgHeader .mhSubject { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; padding: 14px 0 12px; border-bottom: 1px solid var(--mbx-border); font-size: 17px; }
+        #msgHeader .mhSubject .mhLabel { color: var(--mbx-muted); font-size: 15px; font-weight: 600; }
+        #msgHeader .mhSubject .mhValue { font-weight: 700; overflow-wrap: anywhere; }
+        #msgHeader .mhSubject .mhSep { width: 1px; height: 18px; background: var(--mbx-border); align-self: center; }
+        #msgHeader .mhSubject .textLink { font-size: 14px; line-height: normal; padding: 0; color: var(--mbx-accent-deep); font-weight: 600; }
+        #replySubjectRow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 0 0 12px; border-bottom: 1px solid var(--mbx-border); margin-top: -1px; padding-top: 10px; }
+        #replySubjectRow[hidden] { display: none; }
+        #replySubjectRow label { font-size: 13px; color: var(--mbx-muted); }
+        #replySubjectRow input { flex: 1; min-width: 200px; padding: 6px 8px; border: 1px solid var(--mbx-input-border); border-radius: 8px; font: inherit; font-size: 14px; }
+        #replySubjectRow .hint { width: 100%; font-size: 12px; }
+        /* More (three-dot) menu: only actions the mailbox really has. */
+        .mbxMenuWrap { position: relative; }
+        .mbxMenu { position: absolute; right: 0; top: 46px; z-index: 60; min-width: 190px; background: #fff; border: 1px solid var(--mbx-border); border-radius: 8px; box-shadow: 0 6px 18px rgba(26,34,51,0.12); padding: 4px; }
+        .mbxMenu[hidden] { display: none; }
+        .mbxMenu a, .mbxMenu button { display: flex; align-items: center; gap: 8px; width: 100%; box-sizing: border-box; padding: 8px 10px; border: none; background: none; border-radius: 6px; font: inherit; font-size: 14px; color: var(--mbx-text); text-decoration: none; cursor: pointer; text-align: left; }
+        .mbxMenu a:hover, .mbxMenu button:hover { background: var(--mbx-hover); }
         .iconBtn { width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center; border: none; background: none; border-radius: 8px; color: var(--mbx-muted); cursor: pointer; padding: 0; }
         .iconBtn:hover { background: var(--mbx-hover); color: var(--mbx-text); }
         .iconBtn:active { background: var(--mbx-disabled-bg); }
@@ -123,51 +143,79 @@
         /* The conversation (sql/030): one row per message, newest first, hairline
            dividers, no card chrome (2026-11-18 redesign). */
         #threadArea { margin: 0; }
-        .tmDay { font-size: 13px; color: var(--mbx-muted); padding: 16px 0 4px; }
-        .threadMsg { display: flex; gap: 14px; padding: 16px 12px; margin: 0 -12px; border-bottom: 1px solid var(--mbx-divider); }
+        .threadMsg { display: flex; gap: 14px; padding: 14px 12px; margin: 0 -12px; border-bottom: 1px solid var(--mbx-divider); }
         .threadMsg:last-child { border-bottom: none; }
-        .threadMsg.current { background: var(--mbx-selected); box-shadow: inset 3px 0 0 var(--mbx-accent); }
-        .tmAvatar { flex: 0 0 36px; width: 36px; height: 36px; border-radius: 999px; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; background: #e6f2ea; color: #17653a; }
-        .threadMsg.mine .tmAvatar { background: #e4e9f2; color: #3b4a63; }
+        .threadMsg.current { background: var(--mbx-selected); box-shadow: inset 4px 0 0 var(--mbx-accent); border-radius: 0 8px 8px 0; }
+        .tmAvatar { flex: 0 0 36px; width: 36px; height: 36px; border-radius: 999px; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; background: #e6f2ea; color: #276343; }
+        .threadMsg.mine .tmAvatar { background: #e1ecf6; color: var(--mbx-accent-deep); }
         .tmMain { flex: 1; min-width: 0; }
-        .threadMsg .tmHead { display: flex; align-items: baseline; gap: 12px; margin-bottom: 4px; }
-        .tmWho { flex: 1; min-width: 0; font-size: 15px; }
-        .tmWho b { font-weight: 600; }
+        .threadMsg .tmHead { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 12px; margin-bottom: 4px; }
+        .tmWho { flex: 1 1 auto; min-width: 0; font-size: 15px; overflow-wrap: anywhere; }
+        .tmWho b { font-weight: 700; }
         .tmWho .tmMuted, .tmTime { font-size: 13px; color: var(--mbx-muted); font-weight: 400; }
-        .tmTime { white-space: nowrap; }
+        .tmWho .tmTo { margin-left: 8px; color: var(--mbx-muted); font-size: 14px; }
+        .tmTime { white-space: nowrap; margin-left: auto; }
+        .attToggle { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; background: none; border: none; padding: 4px 2px; font: inherit; font-size: 14px; color: var(--mbx-accent-deep); cursor: pointer; }
+        .attToggle svg { width: 16px; height: 16px; }
+        .attToggle .chev { transition: transform 0.15s; }
+        .attToggle[aria-expanded='true'] .chev { transform: rotate(180deg); }
+        .attList[hidden] { display: none; }
         .threadMsg .tmBody { font-size: 15px; line-height: 1.5; overflow-wrap: anywhere; }
         .tmSkeleton { padding: 16px 0; }
         .tmSkeleton div { height: 12px; border-radius: 6px; background: var(--mbx-divider); margin: 8px 0; animation: mbxPulse 1.2s ease-in-out infinite; }
         @keyframes mbxPulse { 50% { opacity: 0.5; } }
         #threadArea .attFile { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--mbx-border); border-radius: 8px; padding: 4px 8px; margin: 8px 6px 0 0; font: inherit; font-size: 13px; cursor: pointer; color: var(--mbx-text); background: #fff; }
         #threadArea .attFile:hover { background: var(--mbx-hover); }
-        /* Task rows: [status pill] [title + meta] [Open], under the message that has the task. */
-        .tmTasks { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
-        .tmTask { display: flex; align-items: center; gap: 12px; border: 1px solid var(--mbx-border); border-radius: 8px; padding: 8px 4px 8px 12px; background: #fff; }
-        .tmTask .tmTaskText { flex: 1; min-width: 0; }
-        .tmTask .tmTaskTitle { font-size: 14px; font-weight: 500; }
-        .tmTask .tmTaskMeta { font-size: 12px; color: var(--mbx-muted); }
-        .stPill { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; white-space: nowrap; background: #fdf1dc; color: #7a4a00; }
-        .stPill svg { width: 12px; height: 12px; }
-        .stPill.done { background: #e8f5ee; color: #17653a; }
-        .stPill.pending { background: #e8effc; color: #1a4a9c; }
+        /* Related Tasks: one section under the conversation. Each row (.itemCard for the open
+           message's own items, .rtRow for tasks on other messages of the thread) is
+           [status] | [type icon] [title / instructions / due / details] [Open]. */
+        #relatedTasks { margin-top: 14px; }
+        #relatedTasks[hidden] { display: none; }
+        .rtHead { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight: 700; margin: 6px 0 10px; }
+        .rtHead svg { width: 22px; height: 22px; color: var(--mbx-text); flex-shrink: 0; }
+        .rtHead::after { content: ""; flex: 1; height: 1px; background: var(--mbx-border); margin-left: 6px; }
+        #itemsArea, #rtOther { display: flex; flex-direction: column; gap: 10px; }
+        #itemsArea:empty, #rtOther:empty { display: none; }
+        #rtOther { margin-top: 10px; }
+        .itemCard, .rtRow { display: flex; align-items: flex-start; gap: 14px; border: 1px solid var(--mbx-border); border-radius: 10px; padding: 14px 16px; background: #fff; font-size: 14px; }
+        .icStatus { flex: 0 0 auto; min-width: 118px; padding-right: 14px; border-right: 1px solid var(--mbx-border); align-self: stretch; display: flex; align-items: center; }
+        .icIcon { flex: 0 0 auto; color: var(--mbx-text); padding-top: 2px; }
+        .icIcon svg { width: 26px; height: 26px; display: block; }
+        .icBody { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+        .icBody > .mbx-item-line { order: -1; }
+        .icBody > strong { font-size: 15px; font-weight: 700; order: -1; }
+        .icBody .hint { margin: 2px 0; }
+        .rtTitleRow { display: flex; align-items: flex-start; gap: 12px; justify-content: space-between; }
+        .rtTitle, .icBody .mbx-item-line .mbx-item-details strong { font-size: 15px; font-weight: 700; overflow-wrap: anywhere; }
+        .rtLine, .taskBanner .tbLine { font-size: 14px; color: var(--mbx-text); display: flex; align-items: center; gap: 6px; }
+        .rtLine svg, .taskBanner svg { width: 16px; height: 16px; flex-shrink: 0; }
+        .rtMeta { font-size: 13px; color: var(--mbx-muted); }
+        .rtDue { font-size: 14px; font-weight: 700; color: var(--mbx-text); display: flex; align-items: center; gap: 6px; }
+        .rtDue svg { width: 16px; height: 16px; }
+        .rtDue.done { color: var(--mbx-success-text); }
+        .rtDue.overdue, .tmOverdue { color: #a1261d; }
+        .icBody .taskBanner { display: flex; flex-direction: column; gap: 3px; }
+        .icBody .taskBanner .linkBtn { align-self: flex-start; color: var(--mbx-accent-deep); font-size: 13px; padding: 2px 0; }
+        .openBtn { flex-shrink: 0; display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 14px; border: 1.5px solid var(--mbx-accent); border-radius: 8px; background: #fff; color: var(--mbx-accent-deep); font: inherit; font-size: 15px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+        .openBtn:hover { background: var(--mbx-selected); }
+        .openBtn svg { width: 16px; height: 16px; }
+        .stPill { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; font-size: 14px; font-weight: 700; padding: 5px 12px; border-radius: 6px; white-space: nowrap; background: var(--mbx-pending-bg); color: var(--mbx-pending-text); }
+        .stPill svg { width: 15px; height: 15px; }
+        .stPill.done { background: var(--mbx-success-bg); color: var(--mbx-success-text); }
+        .stPill.pending { background: #e8eff6; color: var(--mbx-accent-deep); }
         .stPill.cancelled { background: #eef0f3; color: #4f5866; }
         .stPill.overdue { background: #fdeaea; color: #a1261d; }
-        .tmOverdue { color: #a1261d; font-weight: 600; }
+        /* Narrow message pane (tablet, or a wide message list): driven by the pane's own width. */
+        #messagePane { container-type: inline-size; container-name: msgpane; }
+        @container msgpane (max-width: 620px) {
+            #messageScroll, #replyBox { padding-left: 16px; padding-right: 16px; }
+            #msgHeader { padding: 12px 16px 0; }
+            #msgHeader .mhLogo { height: 44px; }
+            .itemCard, .rtRow { flex-wrap: wrap; gap: 10px 12px; padding: 12px; }
+            .icStatus { min-width: 0; border-right: none; padding-right: 0; flex-basis: 100%; }
+        }
         #composeTo { border: 1px solid #ccc; border-radius: 4px; max-height: 180px; overflow-y: auto; padding: 4px 6px; }
         #composeTo label { display: block; font-size: 13px; padding: 2px 0; cursor: pointer; }
-        /* The open message's own items (#itemsArea, inside its row in the conversation):
-           a bordered row like .tmTask, title line first, then the status line. */
-        #itemsArea:empty { display: none; }
-        #itemsArea { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
-        .itemCard { display: flex; flex-direction: column; border: 1px solid var(--mbx-border); border-radius: 8px; padding: 8px 4px 8px 12px; background: #fff; font-size: 14px; }
-        .itemCard > .mbx-item-line { order: -1; }
-        .itemCard > * { margin-right: 8px; }
-        .itemCard > .mbx-item-line { margin-right: 0; }
-        .itemCard .hint { margin: 4px 0; }
-        .itemCard .taskBanner { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; font-size: 12px; color: var(--mbx-muted); margin-top: 4px; }
-        .itemCard .taskBanner .tbText { flex: 1; min-width: 0; }
-        .itemCard .taskBanner a, .itemCard .taskBanner .linkBtn { color: var(--mbx-accent); cursor: pointer; font-size: 12px; }
         /* The only filled button in the message view is Send: buttons inside items are outlined. */
         .itemCard button.primary { background: #fff; color: var(--mbx-accent); border: 1px solid var(--mbx-accent); border-radius: 8px; }
         .itemCard button.primary:hover:not(:disabled) { background: var(--mbx-selected); }
@@ -201,14 +249,15 @@
         table.fieldTable td { border: 1px solid #ddd; padding: 6px 8px; font-size: 13px; }
         table.fieldTable td.k { font-weight: bold; width: 220px; background: #fafafa; }
         #replyBox { border-top: 1px solid var(--mbx-border); }
-        .composer { border: 1px solid var(--mbx-input-border); border-radius: 12px; padding: 10px 8px 8px 14px; transition: border-color 0.15s; }
-        .composer:focus-within { border-color: var(--mbx-accent); }
-        .composer .cmpLabel { font-size: 13px; color: var(--mbx-muted); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-        .composer .cmpLabel label { font-weight: 600; color: var(--mbx-text); }
-        .composer .cmpLabel .textLink { font-size: 13px; padding: 0; line-height: normal; }
-        .composer #replySubject { width: 100%; box-sizing: border-box; margin: 8px 0 0; padding: 6px 8px; border: 1px solid var(--mbx-input-border); border-radius: 8px; font: inherit; font-size: 14px; }
-        .composer textarea { width: 100%; box-sizing: border-box; border: none; outline: none; resize: none; padding: 8px 0 0; margin: 0; font: inherit; font-size: 15px; line-height: 1.5; max-height: 220px; overflow-y: auto; background: transparent; color: var(--mbx-text); }
-        .composer .attachChips { display: block; }
+        .composer { border: 1px solid var(--mbx-input-border); border-radius: 12px; padding: 12px 16px; }
+        .composer .cmpLabel { font-size: 16px; font-weight: 700; color: var(--mbx-text); margin-bottom: 8px; }
+        .composer .cmpLabel label { font-weight: 700; }
+        .composer textarea { width: 100%; box-sizing: border-box; border: 1px solid var(--mbx-input-border); border-radius: 8px; outline: none; resize: none; padding: 10px 12px; margin: 0; font: inherit; font-size: 15px; line-height: 1.5; min-height: 64px; max-height: 220px; overflow-y: auto; background: #fff; color: var(--mbx-text); transition: border-color 0.15s; }
+        .composer textarea:focus { border-color: var(--mbx-accent); box-shadow: 0 0 0 2px rgba(61,113,156,0.18); }
+        .composer .attachChips { display: block; margin-top: 6px; }
+        .attachBtn { display: inline-flex; align-items: center; gap: 8px; height: 44px; padding: 0 8px; border: none; background: none; border-radius: 8px; font: inherit; font-size: 15px; color: var(--mbx-text); cursor: pointer; }
+        .attachBtn:hover { background: var(--mbx-hover); }
+        .attachBtn svg { width: 20px; height: 20px; }
         .composer .cmpActions { display: flex; align-items: center; gap: 8px; }
         .composer .cmpStatus { flex: 1; min-width: 0; font-size: 13px; color: var(--mbx-muted); margin: 0; }
         .composer .cmpStatus.err { color: #b42318; }
@@ -375,7 +424,8 @@
         var currentMessageId = null;
         var currentFolder = "inbox";   // "inbox" | "sent" | "archived"
         var currentArchived = false;   // whether the open message is archived (recipient's own flag)
-        var EMPTY_PANE_HTML = "<p class=\"hint\" style=\"padding:10px\">Select a message.</p>";
+        var currentItems = [];         // the open message's items (renderMessage), for Related Tasks
+        var EMPTY_PANE_HTML ="<p class=\"hint\" style=\"padding:10px\">Select a message.</p>";
 
         function api(path, opts) {
             opts = opts || {};
@@ -1088,8 +1138,60 @@
             forward: "<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round' aria-hidden='true'><path d='M14 5l7 7-7 7'/><path d='M21 12H9a6 6 0 0 0-6 6v1'/></svg>",
             attach: "<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round' aria-hidden='true'><path d='M21 11.5l-8.6 8.6a5 5 0 0 1-7.1-7.1l8.6-8.6a3.3 3.3 0 0 1 4.7 4.7l-8.6 8.6a1.7 1.7 0 0 1-2.4-2.4l7.9-7.9'/></svg>",
             lock: "<svg width='13' height='13' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' aria-hidden='true'><rect x='5' y='11' width='14' height='9' rx='2'/><path d='M8 11V8a4 4 0 0 1 8 0v3'/></svg>",
-            check: "<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='3' stroke-linecap='round' stroke-linejoin='round' aria-hidden='true'><path d='M5 12.5l4.5 4.5L19 7.5'/></svg>"
+            check: "<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='3' stroke-linecap='round' stroke-linejoin='round' aria-hidden='true'><path d='M5 12.5l4.5 4.5L19 7.5'/></svg>",
+            more: "<svg viewBox='0 0 24 24' fill='currentColor' aria-hidden='true'><circle cx='12' cy='5' r='2'/><circle cx='12' cy='12' r='2'/><circle cx='12' cy='19' r='2'/></svg>",
+            external: "<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' aria-hidden='true'><path d='M14 4h6v6'/><path d='M20 4l-9 9'/><path d='M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5'/></svg>",
+            calendar: "<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' aria-hidden='true'><rect x='3.5' y='5' width='17' height='15' rx='2'/><path d='M3.5 10h17M8 3v4M16 3v4'/></svg>",
+            form: "<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round' aria-hidden='true'><path d='M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z'/><path d='M14 3v5h5M9 13h6M9 17h6'/></svg>",
+            exam: "<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round' aria-hidden='true'><rect x='5' y='4' width='14' height='17' rx='2'/><path d='M9 4V3h6v1a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1z'/><path d='M9 13l2 2 4-4'/></svg>",
+            report: "<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round' aria-hidden='true'><rect x='3.5' y='4' width='17' height='16' rx='2'/><path d='M3.5 9h17M3.5 14h17M9.5 9v11'/></svg>",
+            tasks: "<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round' aria-hidden='true'><rect x='4.5' y='4' width='15' height='17' rx='2'/><path d='M9 4V3h6v1'/><path d='M8 10h1M11 10h5M8 14h1M11 14h5'/></svg>",
+            user: "<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round' aria-hidden='true'><circle cx='12' cy='8' r='4'/><path d='M4 21a8 8 0 0 1 16 0'/></svg>",
+            chevron: "<svg class='chev' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' aria-hidden='true'><path d='M6 9l6 6 6-6'/></svg>",
+            refresh: "<svg viewBox='0 0 24 24' width='16' height='16' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' aria-hidden='true'><path d='M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7'/></svg>"
         };
+        // A SQL date (DueDate, serialized as midnight) as "Nov 18, 2026", read as a calendar
+        // date so no time-zone conversion can shift it a day.
+        function fmtDueDate(due) {
+            var m = String(due || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+            if (!m) return "";
+            return new Date(+m[1], +m[2] - 1, +m[3]).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
+        }
+        // "Due: Nov 18, 2026" line for a task row; nothing when the task has no due date.
+        function dueLineHtml(due, status) {
+            var txt = fmtDueDate(due);
+            if (!txt) return "";
+            var finished = status === "Completed" || status === "Cancelled";
+            var overdue = !finished && String(due).substring(0, 10) < new Date().toISOString().substring(0, 10);
+            return "<div class='rtDue" + (status === "Completed" ? " done" : overdue ? " overdue" : "") + "'>" + MBX_ICONS.calendar +
+                "Due: " + escapeHtml(txt) + (overdue ? " (overdue)" : "") + "</div>";
+        }
+        // Optional assignee line: only when the data carries it (MBX_GetMessage / MBX_GetThread
+        // don't return assignee names today, so nothing is shown rather than guessed).
+        function assigneeLineHtml(x) {
+            if (!x || !x.AssigneeName) return "";
+            return "<div class='rtLine'>" + MBX_ICONS.user + "<span>Assigned to: " + escapeHtml(x.AssigneeName) +
+                (x.AssigneeCompany ? " (" + escapeHtml(x.AssigneeCompany) + ")" : "") + "</span></div>";
+        }
+        // What the assignee is asked to do, by task type (the same text the task banner has always shown).
+        var TASK_INSTRUCTIONS = {
+            FormApplication: "Fill out this form and click Save for Use.",
+            DynamicReport: "Fill in the Excel template and upload it.",
+            Exam: "Answer the exam questions and supply the requested documents."
+        };
+        function typeIconHtml(kind) {
+            return MBX_ICONS[kind === "Exam" || kind === "ExamTask" || kind === "ExamRef" ? "exam"
+                : kind === "DynamicReport" || kind === "DRTask" ? "report" : "form"];
+        }
+        // One Related Tasks row: [status] | [icon] [body]. Used for the open message's item
+        // cards (renderMessage / refreshTaskCards) so their existing contents keep working.
+        function cardShellHtml(item, inner) {
+            var st = item.TaskID ? item.TaskStatus : item.OriginTaskStatus;
+            var due = item.TaskID ? item.DueDate : item.OriginDueDate;
+            return "<div class='icStatus'>" + (st ? statusPillHtml(st, due) : "") + "</div>" +
+                "<div class='icIcon'>" + typeIconHtml(item.TaskType || item.OriginTaskType || item.ItemType) + "</div>" +
+                "<div class='icBody'>" + inner + "</div>";
+        }
         // A task's status as a pill: text + icon, never colour alone. due = SQL date string or empty.
         function statusPillHtml(status, due) {
             var st = status || "Open";
@@ -1108,45 +1210,69 @@
                 : " &middot; Due " + escapeHtml(d);
         }
 
-        function threadTasksHtml(tasks) {
-            if (!tasks || !tasks.length) return "";
+        // A task on ANOTHER message of the conversation (sql/035), as a Related Tasks row.
+        // Open goes to that message, where the task's own card (and its record) lives.
+        function otherTaskRowHtml(t, from) {
             var what = { FormApplication: "Form application", DynamicReport: "Dynamic report", Exam: "Exam" };
-            return "<div class='tmTasks'>" + tasks.map(function (t) {
-                var st = t.TaskStatus || "Open";
-                var name = t.TaskType === "Exam" && t.ExamName ? t.ExamName : (t.ItemLabel || what[t.TaskType] || "Task");
-                var meta = escapeHtml(what[t.TaskType] || "Task") + (st === "Saved" ? " &middot; waiting for Save for Use" : "") + dueHtml(t.DueDate, st);
-                return "<div class='tmTask'>" + statusPillHtml(st, t.DueDate) +
-                    "<div class='tmTaskText'><div class='tmTaskTitle'>" + escapeHtml(name) + "</div><div class='tmTaskMeta'>" + meta + "</div></div>" +
-                    "<button type='button' class='textLink' title='Open the message with this task' onclick='openMessage(" + t.MessageID + ")'>Open</button></div>";
-            }).join("") + "</div>";
+            var st = t.TaskStatus || "Open";
+            var name = t.TaskType === "Exam" && t.ExamName ? t.ExamName : (t.ItemLabel || what[t.TaskType] || "Task");
+            var where = from ? "On the message from " + escapeHtml(from.FromName || "") + ", " + escapeHtml(mbxShortTime(from.DTCreated)) : "";
+            return "<div class='rtRow' data-task-msg='" + t.MessageID + "'>" +
+                "<div class='icStatus'>" + statusPillHtml(st, t.DueDate) + "</div>" +
+                "<div class='icIcon'>" + typeIconHtml(t.TaskType) + "</div>" +
+                "<div class='icBody'><div class='rtTitleRow'><div class='rtTitle'>" + escapeHtml(name) + "</div>" +
+                "<button type='button' class='openBtn' onclick='openMessage(" + t.MessageID + ")' aria-label='Open " + escapeHtml(name) + " (goes to its message)'>Open " + MBX_ICONS.external + "</button></div>" +
+                assigneeLineHtml(t) +
+                (TASK_INSTRUCTIONS[t.TaskType] ? "<div class='rtLine'>" + TASK_INSTRUCTIONS[t.TaskType] + (st === "Saved" ? " Saved, waiting for Save for Use." : "") + "</div>" : "") +
+                dueLineHtml(t.DueDate, st) +
+                "<div class='rtMeta'>" + escapeHtml(what[t.TaskType] || "Task") + (where ? " &middot; " + where : "") + "</div>" +
+                "</div></div>";
+        }
+        function mbxShortTime(v) {
+            return mbxDate(v).toLocaleString([], { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
+        }
+        // Related Tasks (n): the open message's item cards + tasks on other messages.
+        function updateRelatedTasks() {
+            var sec = document.getElementById("relatedTasks");
+            if (!sec) return;
+            var n = sec.querySelectorAll("#itemsArea > .itemCard, #rtOther > .rtRow").length;
+            sec.hidden = n === 0;
+            var c = document.getElementById("rtCount");
+            if (c) c.textContent = n;
+        }
+        function toggleAttList(btn) {
+            var list = document.getElementById(btn.getAttribute("aria-controls"));
+            var open = btn.getAttribute("aria-expanded") !== "true";
+            btn.setAttribute("aria-expanded", String(open));
+            if (list) list.hidden = !open;
         }
 
-        function threadCardHtml(m, atts, isCurrent, tasks) {
-            var name = m.FromMe ? "You" : (m.FromName || "");
+        // One message: [avatar] Sender (Company) to Recipients ......... date/time, then the
+        // body and that message's own attachments. The open message gets the blue left rule.
+        function threadCardHtml(m, atts, isCurrent) {
             var when = mbxDate(m.DTCreated);
             var iso = isNaN(when) ? "" : when.toISOString();
             var html = "<div class='threadMsg" + (isCurrent ? " current" : "") + (m.FromMe ? " mine" : "") + "' data-thread-id='" + m.MessageID + "'" +
                 (isCurrent ? " aria-current='true'" : "") + ">" +
-                "<div class='tmAvatar' aria-hidden='true'>" + escapeHtml(initialsOf(m.FromName || name)) + "</div><div class='tmMain'>" +
-                "<div class='tmHead'><div class='tmWho'><b>" + escapeHtml(name) + "</b>" +
-                (!m.FromMe && m.FromCompany ? " <span class='tmMuted'>" + escapeHtml(m.FromCompany) + "</span>" : "") +
-                (m.ToNames ? " <span class='tmMuted'>to " + escapeHtml(m.ToNames) + "</span>" : "") + "</div>" +
+                "<div class='tmAvatar' aria-hidden='true'>" + escapeHtml(initialsOf(m.FromName)) + "</div><div class='tmMain'>" +
+                "<div class='tmHead'><div class='tmWho'><b>" + escapeHtml(m.FromName || "") + "</b>" +
+                (m.FromMe ? " <span class='tmMuted'>(You)</span>" : m.FromCompany ? " <span class='tmMuted'>(" + escapeHtml(m.FromCompany) + ")</span>" : "") +
+                (m.ToNames ? "<span class='tmTo'>to " + escapeHtml(m.ToNames) + "</span>" : "") + "</div>" +
                 "<time class='tmTime' datetime='" + iso + "' title='" + escapeHtml(mbxFullTime(when)) + "'>" +
-                escapeHtml(when.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })) + "</time></div>" +
+                escapeHtml(mbxShortTime(when)) + "</time></div>" +
                 "<div class='tmBody'>" + (escapeHtml(m.Body || "").replace(/\n/g, "<br/>") || "<span class='hint'>(no text)</span>") + "</div>";
-            if (!isCurrent) html += threadTasksHtml(tasks);
             if (atts.length) {
-                html += "<div>" + atts.map(function (a) {
-                    return "<button type='button' class='attFile' title='Download' onclick='downloadAttachment(" + a.AttachmentID + ", " +
-                        escapeHtml(JSON.stringify(a.FileName)) + ")'><span aria-hidden='true'>&#128206;</span> " + escapeHtml(a.FileName) + " (" + fileSizeText(a.SizeBytes) + ")</button>";
-                }).join("") + "</div>";
+                var files = atts.map(function (a) {
+                    return "<button type='button' class='attFile' title='Download " + escapeHtml(a.FileName) + "' onclick='downloadAttachment(" + a.AttachmentID + ", " +
+                        escapeHtml(JSON.stringify(a.FileName)) + ")'>" + MBX_ICONS.attach.replace("<svg ", "<svg width='15' height='15' ") + " " + escapeHtml(a.FileName) + " (" + fileSizeText(a.SizeBytes) + ")</button>";
+                }).join("");
+                // One or two files show as they are; more collapse to "n attachments" (expand in place).
+                html += atts.length <= 2 ? "<div>" + files + "</div>"
+                    : "<button type='button' class='attToggle' aria-expanded='false' aria-controls='attList_" + m.MessageID + "' onclick='toggleAttList(this)'>" +
+                      MBX_ICONS.attach + atts.length + " attachments" + MBX_ICONS.chevron + "</button>" +
+                      "<div class='attList' id='attList_" + m.MessageID + "' hidden>" + files + "</div>";
             }
-            // The open message's own items (#itemsArea) are moved in here (renderMessage, loadThread).
             return html + "</div></div>";
-        }
-
-        function dayHeaderHtml(d) {
-            return "<div class='tmDay'>" + escapeHtml(d.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })) + "</div>";
         }
 
         function loadThread(messageId) {
@@ -1161,22 +1287,27 @@
                     var tasks = JSON.parse(res.tasks || "[]");
                     // Newest first.
                     msgs.sort(function (a, b) { return (mbxDate(b.DTCreated) - mbxDate(a.DTCreated)) || (b.MessageID - a.MessageID); });
-                    // Keep the open message's items (they may hold an open record) across the re-render.
-                    var items = document.getElementById("itemsArea");
-                    if (items) items.remove();
-                    var lastDay = "";
                     area.innerHTML = msgs.map(function (m) {
-                        var d = mbxDate(m.DTCreated), day = d.toDateString();
-                        var head = day !== lastDay ? dayHeaderHtml(d) : "";
-                        lastDay = day;
-                        return head + threadCardHtml(m, atts.filter(function (a) { return a.MessageID === m.MessageID; }), m.MessageID === messageId,
-                            tasks.filter(function (t) { return t.MessageID === m.MessageID; }));
+                        return threadCardHtml(m, atts.filter(function (a) { return a.MessageID === m.MessageID; }), m.MessageID === messageId);
                     }).join("");
-                    var cur = area.querySelector(".threadMsg.current .tmMain");
-                    if (items) (cur || area).appendChild(items);
+                    // Tasks on the other messages of the conversation go in Related Tasks, after the
+                    // open message's own items. A reply that carries a copy of a task's record
+                    // (OriginTaskType) already shows that task, so the original isn't listed twice.
+                    var byId = {};
+                    msgs.forEach(function (m) { byId[m.MessageID] = m; });
+                    var shownCopies = (currentItems || []).filter(function (i) { return i.OriginTaskType; })
+                        .map(function (i) { return i.OriginTaskType + "|" + (i.ItemLabel || ""); });
+                    var other = document.getElementById("rtOther");
+                    if (other) {
+                        other.innerHTML = tasks.filter(function (t) {
+                            return t.MessageID !== messageId && shownCopies.indexOf(t.TaskType + "|" + (t.ItemLabel || "")) === -1;
+                        }).map(function (t) { return otherTaskRowHtml(t, byId[t.MessageID]); }).join("");
+                    }
+                    updateRelatedTasks();
                     var count = document.getElementById("msgCount");
-                    if (count) count.textContent = " · " + msgs.length + (msgs.length === 1 ? " message" : " messages");
-                    if (cur && msgs.length > 1) cur.parentNode.scrollIntoView({ block: "nearest" });
+                    if (count) count.textContent = msgs.length + (msgs.length === 1 ? " message" : " messages");
+                    var cur = area.querySelector(".threadMsg.current");
+                    if (cur && msgs.length > 1) cur.scrollIntoView({ block: "nearest" });
                 })
                 .catch(function () { dropSkeleton(); /* the opened message alone stays shown */ });
         }
@@ -1468,17 +1599,33 @@
             var assigneeShare = msg.AssigneeSharedAccess || "";
             var worksAsRecipient = isRecipient || !!assigneeShare;
 
-            // 2026-11-18 redesign: fixed header (title, secure-message line, Archive / Forward
-            // icons for a recipient as before, and the portal link that replaced the footer bar).
-            var html = "<div id='msgHeader'><div class='mhText'><h2>" + escapeHtml(stripRe(msg.Subject) || msg.Subject || "(no subject)") + "</h2>" +
-                "<div class='mhSub'>" + MBX_ICONS.lock + "<span>Secure message<span id='msgCount'></span></span></div></div>" +
-                "<div class='mhActions'>" +
+            currentItems = items;
+            // 2026-11-18 redesign (rev 2): fixed header. CMS Services logo left; Archive / Forward
+            // (a recipient only, as before) and More top right with the secure-message line under
+            // them; then the always-visible Subject row. "Edit subject" edits the subject of the
+            // caller's REPLY (the only subject editing the mailbox has); the stored subject never changes.
+            var subject = stripRe(msg.Subject) || msg.Subject || "(no subject)";
+            var html = "<div id='msgHeader'><div class='mhTop'>" +
+                "<img class='mhLogo' src='images/logo_1704.png' alt='CMS Services: Simplify Compliance... Improve Performance' />" +
+                "<div class='mhRight'><div class='mhActions'>" +
                 (isRecipient
                     ? "<button type='button' class='iconBtn' onclick='archiveCurrent()' aria-label='" + (currentArchived ? "Move to Inbox" : "Archive") + "' title='" + (currentArchived ? "Move to Inbox" : "Archive") + "'>" + (currentArchived ? MBX_ICONS.unarchive : MBX_ICONS.archive) + "</button>" +
                       "<button type='button' class='iconBtn' onclick='openForward(" + msg.MessageID + ")' aria-label='Forward' title='Forward: send a copy to colleagues in your company'>" + MBX_ICONS.forward + "</button>"
                     : "") +
-                "<a class='textLink' href='https://portal.cms-services.net' target='_blank' rel='noopener'>Open in portal &rsaquo;</a>" +
-                "</div></div>";
+                "<div class='mbxMenuWrap'><button type='button' class='iconBtn' id='msgMoreBtn' aria-label='More actions' title='More actions' aria-haspopup='true' aria-expanded='false' aria-controls='msgMoreMenu' onclick='toggleMoreMenu()'>" + MBX_ICONS.more + "</button>" +
+                "<div class='mbxMenu' id='msgMoreMenu' role='menu' hidden>" +
+                "<button type='button' role='menuitem' onclick='toggleMoreMenu(false); refreshMailbox()'>" + MBX_ICONS.refresh + "Refresh</button>" +
+                "<a role='menuitem' href='https://portal.cms-services.net' target='_blank' rel='noopener' onclick='toggleMoreMenu(false)'>" + MBX_ICONS.external.replace("<svg ", "<svg width='16' height='16' ") + "Open CMS portal</a>" +
+                "</div></div></div>" +
+                "<div class='mhSub'>" + MBX_ICONS.lock + "<span>Secure message &middot; <span id='msgCount'>1 message</span></span></div></div></div>" +
+                "<div class='mhSubject'><span class='mhLabel'>Subject:</span><span class='mhValue'>" + escapeHtml(subject) + "</span>" +
+                (isRecipient ? "<span class='mhSep' aria-hidden='true'></span><button type='button' class='textLink' id='replySubjectToggle' aria-expanded='false' aria-controls='replySubjectRow' onclick='toggleReplySubject()'>Edit subject</button>" : "") +
+                "</div>" +
+                (isRecipient ? "<div id='replySubjectRow' hidden><label for='replySubject'>Subject of your reply</label>" +
+                    "<input id='replySubject' value='Re: " + escapeHtml(stripRe(msg.Subject)) + "' />" +
+                    "<button type='button' class='textLink' onclick='toggleReplySubject()'>Done</button>" +
+                    "<div class='hint'>Changes the subject of the reply you send. This conversation's subject stays the same.</div></div>" : "") +
+                "</div>";
             html += "<div id='messageScroll'>";
             // A colleague a task here was shared with (sql/026): they see it as its sender does.
             // sql/041: a Global Administrator of the assigner's or assignee's company (no real share).
@@ -1503,29 +1650,26 @@
                 MessageID: msg.MessageID, FromName: msg.FromName, FromCompany: msg.FromCompany,
                 ToNames: msg.ToNames, DTCreated: msg.DTCreated, Body: msg.Body, FromMe: !worksAsRecipient && !msg.SharedAccess
             }, [], true) + "<div class='tmSkeleton' aria-hidden='true'><div style='width:40%'></div><div style='width:85%'></div><div style='width:65%'></div></div></div>";
+            // Related Tasks: the open message's own items (#itemsArea, full cards: Open, Share,
+            // Mark as Completed, report upload) + tasks on the conversation's other messages (#rtOther).
+            html += "<section id='relatedTasks' aria-labelledby='rtHeading' hidden><h3 class='rtHead' id='rtHeading'>" + MBX_ICONS.tasks +
+                "<span>Related Tasks (<span id='rtCount'>0</span>)</span></h3><div id='itemsArea'></div><div id='rtOther'></div></section>";
             html += "</div>";
             // Deliberately OUTSIDE #messageScroll, as a fixed sibling — see the
             // #replyBox/#messageScroll CSS comment above.
             if (isRecipient) {
                 html += "<div id='replyBox'><div class='composer'>" +
-                    "<div class='cmpLabel'><label for='replyBody'>Reply to " + escapeHtml(msg.FromName || "sender") + "</label>" +
-                    "<span aria-hidden='true'>&middot;</span><button type='button' class='textLink' id='replySubjectToggle' aria-expanded='false' aria-controls='replySubject' onclick='toggleReplySubject()'>Edit subject</button></div>" +
-                    "<input id='replySubject' aria-label='Subject' hidden value='Re: " + escapeHtml(stripRe(msg.Subject)) + "' />" +
+                    "<div class='cmpLabel'><label for='replyBody'>Reply to " + escapeHtml(msg.FromName || "sender") + "</label></div>" +
                     "<textarea id='replyBody' placeholder='Write a reply…' rows='2' oninput='updateReplyButton(); growReplyBody()' onkeydown='if ((event.ctrlKey || event.metaKey) && event.key === \"Enter\") { event.preventDefault(); sendReply(); }'></textarea>" +
                     "<span class='attachChips' id='replyFiles'></span>" +
                     "<div class='cmpActions'>" +
-                    "<button type='button' class='iconBtn' aria-label='Attach files' title='Attach files' onclick='document.getElementById(\"replyFileInput\").click()'>" + MBX_ICONS.attach + "</button>" +
+                    "<button type='button' class='attachBtn' aria-label='Attach files' title='Attach files (up to 10, 25 MB each)' onclick='document.getElementById(\"replyFileInput\").click()'>" + MBX_ICONS.attach + "Attach files</button>" +
                     "<input type='file' id='replyFileInput' multiple hidden onchange='addPickedFiles(this, \"reply\")' />" +
                     "<div class='cmpStatus' id='replyError' role='status' aria-live='polite'></div>" +
                     "<button type='button' class='sendBtn' id='replySendBtn' onclick='sendReply()' disabled title='Send (Ctrl+Enter)'>Send</button>" +
                     "</div></div></div>";
             }
             pane.innerHTML = html;
-            // The open message's own items live inside its row in the conversation.
-            var curMain = pane.querySelector(".threadMsg.current .tmMain");
-            var itemsDiv = document.createElement("div");
-            itemsDiv.id = "itemsArea";
-            (curMain || document.getElementById("messageScroll")).appendChild(itemsDiv);
             pickedFiles.reply = [];
             loadThread(msg.MessageID);
 
@@ -1596,11 +1740,44 @@
                     var btn = document.createElement("button");
                     btn.innerText = "Download: " + (item.ItemLabel || item.ItemType);
                     btn.onclick = function () { downloadItem(item.MessageItemID, item.ItemLabel); };
+                    btn.className = "openBtn";
                     card.appendChild(btn);
                     itemsArea.appendChild(card);
                 }
             });
+            // Each card becomes a Related Tasks row: [status] | [icon] [its existing contents].
+            items.forEach(function (item) {
+                var card = itemsArea.querySelector(".itemCard[data-item-id='" + item.MessageItemID + "']");
+                if (card) wrapCard(card, item);
+            });
+            updateRelatedTasks();
         }
+
+        // Moves a card's existing nodes (with their handlers) into the row shell's body.
+        function wrapCard(card, item) {
+            var kids = Array.prototype.slice.call(card.childNodes);
+            card.innerHTML = cardShellHtml(item, "");
+            var body = card.querySelector(".icBody");
+            kids.forEach(function (k) { body.appendChild(k); });
+        }
+
+        // The three-dot More menu (header). open: true / false, or omitted to toggle.
+        function toggleMoreMenu(open) {
+            var menu = document.getElementById("msgMoreMenu"), btn = document.getElementById("msgMoreBtn");
+            if (!menu) return;
+            if (typeof open !== "boolean") open = menu.hidden;
+            menu.hidden = !open;
+            if (btn) btn.setAttribute("aria-expanded", String(open));
+            if (open) { var first = menu.querySelector("button, a"); if (first) first.focus(); }
+        }
+        document.addEventListener("click", function (e) {
+            var menu = document.getElementById("msgMoreMenu");
+            if (menu && !menu.hidden && !e.target.closest(".mbxMenuWrap")) toggleMoreMenu(false);
+        });
+        document.addEventListener("keydown", function (e) {
+            var menu = document.getElementById("msgMoreMenu");
+            if (e.key === "Escape" && menu && !menu.hidden) { toggleMoreMenu(false); var b = document.getElementById("msgMoreBtn"); if (b) b.focus(); }
+        });
 
         // An item as its sender sees it in Sent: read-only, but a task item shows its
         // status — this is how the assigner follows progress — and, when the tasks
@@ -1673,8 +1850,8 @@
             var st = item.OriginTaskStatus;
             var done = st === "Completed", pending = st === "Pending Review", cancelled = st === "Cancelled";
             var what = { FormApplication: "Form application task", DynamicReport: "Dynamic report task", Exam: "Exam task" }[item.OriginTaskType] || "Task";
-            return "<div class='taskBanner'>" + statusPillHtml(st, item.OriginDueDate) + "<span class='tbText'>" + what +
-                (st === "Saved" ? " &middot; waiting for Save for Use" : "") + dueHtml(item.OriginDueDate, st) + "</span></div>";
+            return "<div class='taskBanner'><div class='tbLine'>" + what + " (this message carries its record)" +
+                (st === "Saved" ? ". Saved, waiting for Save for Use." : "") + "</div>" + dueLineHtml(item.OriginDueDate, st) + "</div>";
         }
 
         // On a reply's copy of a finished record/report (sql/014): if the task it came
@@ -1684,8 +1861,8 @@
         function reviewBarHtml(item) {
             if (!item.ReviewTaskItemID) return "";
             var id = item.MessageItemID;
-            return "<div class='taskBanner' id='reviewBar_" + id + "'>" + statusPillHtml("Pending Review") +
-                "<span class='tbText'>Task finished &middot; check it, then</span> " +
+            return "<div class='taskBanner' id='reviewBar_" + id + "'>" +
+                "<div class='tbLine'>The assignee finished this task. Check it, then</div> " +
                 "<button class='primary' id='reviewReplyBtn_" + id + "' onclick='reviewFromReply(" + item.ReviewTaskItemID + "," + id + ")'>Mark as Completed</button> " +
                 "<span class='err' id='reviewReplyMsg_" + id + "'></span></div>";
         }
@@ -1699,7 +1876,9 @@
                     if (r.status === 401) { logout(); throw new Error("unauthorized"); }
                     if (!r.ok) throw new Error("refused");
                     var bar = document.getElementById("reviewBar_" + itemId);
-                    bar.innerHTML = statusPillHtml("Completed") + "<span class='tbText'>You marked this task completed.</span>";
+                    bar.innerHTML = "<div class='tbLine'>You marked this task completed.</div>";
+                    var pillBox = bar.closest(".itemCard") && bar.closest(".itemCard").querySelector(".icStatus");
+                    if (pillBox) pillBox.innerHTML = statusPillHtml("Completed");
                 })
                 .catch(function () {
                     btn.disabled = false;
@@ -1777,13 +1956,15 @@
                         var statusChanged = card.getAttribute("data-task-status") !== (item.TaskStatus || "");
                         card.setAttribute("data-task-status", item.TaskStatus || "");
                         if (card.getAttribute("data-sender-view")) {
-                            if (statusChanged) card.innerHTML = senderCardHtml(item);
+                            if (statusChanged) { card.innerHTML = senderCardHtml(item); wrapCard(card, item); }
                             return;
                         }
                         if (item.ItemType === "DRTask") {
-                            if (statusChanged) card.innerHTML = drCardHtml(item);
+                            if (statusChanged) { card.innerHTML = drCardHtml(item); wrapCard(card, item); }
                             return;
                         }
+                        var pillBox = card.querySelector(".icStatus");
+                        if (pillBox) pillBox.innerHTML = item.TaskStatus ? statusPillHtml(item.TaskStatus, item.DueDate) : "";
                         var banner = card.querySelector(".taskBanner");
                         if (banner) banner.outerHTML = taskBanner(item);
                         // A new-record task's first save gives the line its record ID.
@@ -1818,15 +1999,16 @@
             }[item.TaskStatus] || "Open";
             // DueDate is a SQL date (serialized as midnight) — show the date part as-is
             // rather than letting a timezone conversion shift it a day.
-            var due = cancelled ? "" : dueHtml(item.DueDate, done ? "Completed" : "");
             // The task's own assignee can share it with colleagues in their company (sql/028).
             var share = (item.IsAssigneeOwner && !cancelled)
                 ? "<button type='button' class='linkBtn' onclick='openTaskShare(" + item.TaskID + ")'>Share with a colleague</button>"
                 : "";
-            // 2026-11-18 redesign: status pill + instruction as one muted line (was a tinted bar).
-            var pill = formNotCreated ? "<span class='stPill'>" + escapeHtml(statusText) + "</span>" : statusPillHtml(item.TaskStatus, done ? "" : item.DueDate);
-            return "<div class='taskBanner'>" + pill + "<span class='tbText'>" + what + due +
-                (item.TaskStatus === "Saved" ? " &middot; waiting for Save for Use" : "") + "</span>" + share + "</div>";
+            // 2026-11-18 redesign: the status is the row's pill (cardShellHtml); this is the
+            // assignee, the instruction, the due date and Share.
+            return "<div class='taskBanner'>" + assigneeLineHtml(item) +
+                "<div class='tbLine'>" + what + (/[.!?]$/.test(what) ? "" : ".") +
+                (formNotCreated ? " " + statusText + "." : item.TaskStatus === "Saved" ? " Saved, waiting for Save for Use." : "") + "</div>" +
+                (cancelled ? "" : dueLineHtml(item.DueDate, item.TaskStatus)) + share + "</div>";
         }
 
         // ---- Dynamic Report viewer (sql/010, DRViewController) ----------------
@@ -1864,7 +2046,7 @@
             return "<div class='mbx-item-line' data-kind='" + kind + "' data-msg-item='" + item.MessageItemID + "' data-title='" + escapeHtml(title) + "'>" +
                 "<div class='mbx-item-details'><strong>" + escapeHtml(title) + "</strong>" +
                 (sub ? "<div class='mbx-item-sub'>" + sub + "</div>" : "") + "</div>" +
-                (canOpen ? "<button type='button' class='textLink' onclick='mbxOpenItem(this)'>Open</button>" : "") +
+                (canOpen ? "<button type='button' class='openBtn' onclick='mbxOpenItem(this)' aria-label='Open " + escapeHtml(title) + "'>Open " + MBX_ICONS.external + "</button>" : "") +
                 "</div>";
         }
 
@@ -2397,11 +2579,12 @@
 
         // "Edit subject" shows / hides the reply's subject (it defaults to "Re: <subject>").
         function toggleReplySubject() {
-            var inp = document.getElementById("replySubject"), link = document.getElementById("replySubjectToggle");
-            if (!inp) return;
-            inp.hidden = !inp.hidden;
-            if (link) { link.setAttribute("aria-expanded", String(!inp.hidden)); link.textContent = inp.hidden ? "Edit subject" : "Hide subject"; }
-            if (!inp.hidden) inp.focus();
+            var row = document.getElementById("replySubjectRow"), link = document.getElementById("replySubjectToggle");
+            if (!row) return;
+            row.hidden = !row.hidden;
+            if (link) link.setAttribute("aria-expanded", String(!row.hidden));
+            if (!row.hidden) document.getElementById("replySubject").focus();
+            else if (link) link.focus();
         }
 
         function setReplyStatus(text, isError) {
