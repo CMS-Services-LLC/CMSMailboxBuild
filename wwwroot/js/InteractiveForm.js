@@ -2434,10 +2434,8 @@ function ViewDispGO(js, jsVals, JoinedID, JoinedTitle, jsMgtData, jsMultiAnswers
 
     }
 
-    xsection(dispButtons, [
-        "button|id=iaBackBtn|class=blueButton|onclick=SwitchReport()|<-- Back",
-        "label|class=padLeft10"
-    ]);
+    //CMSMailbox adaptation 20261118 (John): no Back button. The mailbox viewer is never CMS's main
+    //Form Applications section, so there is no report list to go back to.
     console.log("approvalBy", jsVals[0].ApprovalBy, myCID);
     if (js.Status == "Pending approval" && jsVals[0].ApprovalBy.ApprovalCID == myCID) {
         xsection(dispButtons, [
@@ -2480,8 +2478,8 @@ function ViewDispGO(js, jsVals, JoinedID, JoinedTitle, jsMgtData, jsMultiAnswers
                     "button|name=btnSave|class=btnIASave blueButton|onclick=SubmitRecord(" + js.MainID + ", " + isReleased + ")|Save"),
                 "label|class=padLeft10",
 
-                ((js.MainID == 0) ? "" : (isReleased == 1) ? "" : (!canRelease) ? "" : "button|name=btnSave|class=btnIASave longblueButton|style=width:100px|onclick=SubmitRecord(" + js.MainID + ", 1)|Save for Use"),
-                ((js.MainID == 0) ? "" : (isReleased == 1) ? "" : (canRelease) ? "" : "button|disabled=true|title=You do not have permission to release this application|class=longblueButton|style=width:100px|Save for Use"),
+                ((js.MainID == 0) ? "" : (isReleased == 1) ? "" : (!canRelease) ? "" : "button|name=btnSave|class=btnIASave longblueButton|style=width:170px|onclick=SubmitRecord(" + js.MainID + ", 1)|Save for Use and Sharing"),
+                ((js.MainID == 0) ? "" : (isReleased == 1) ? "" : (canRelease) ? "" : "button|disabled=true|title=You do not have permission to release this application|class=longblueButton|style=width:170px|Save for Use and Sharing"),
                 ((js.MainID != 0) ? "label|class=padLeft10" : ""),
             ]);
 
@@ -5403,7 +5401,8 @@ function RecordHistory(main, mainid) {
 //code:20261118 Action Request banner (port of CMS global.js showActionRequestTarget, ar_001).
 //An Action Request on a whole dynamic report or another form record has no SystemLinkFID;
 //NEO_IAGetSystemLinkTarget (pinned to this item's record in IaViewerController) says what it points at.
-//The mailbox has no Dynamic Reports screen, so the link opens CMS in a new tab.
+//A Dynamic Report opens in the mailbox's own report viewer (index.html, DRViewController via sql/045):
+//this frame asks the mailbox page to open it. A linked form record is shown as text only.
 function mbxShowActionRequestTarget(mainid) {
     if (!mainid || mainid <= 0) return;
     getData(null, newFormData("_IAGetSystemLinkTarget", { mainid: mainid }), function (vr) {
@@ -5412,24 +5411,20 @@ function mbxShowActionRequestTarget(mainid) {
         var dt = (Array.isArray(js) && js.length > 0) ? js[0] : null;
         var panel = document.getElementById("dispTopPanner");
         if (!dt || !panel || document.getElementById("dispSystemLink")) return;
-        var lbl = (dt.ElemType == "Dynamic Report") ? "Dynamic Report" : (dt.ElemType == "Form Record") ? "Form Application" : (dt.ElemType || "");
+        var isReport = (dt.ElemType == "Dynamic Report");
         var row = document.createElement("div");
         row.id = "dispSystemLink";
-        row.appendChild(document.createTextNode(lbl + ":"));
+        row.appendChild(document.createTextNode((isReport ? "Dynamic Report" : "Form Application") + ":"));
         var a = document.createElement("label");
-        a.className = "alink padLeft10";
+        a.className = isReport ? "alink padLeft10" : "padLeft10";
         a.textContent = dt.ElemName || "";
-        a.title = "Open in CMS";
-        a.onclick = mbxOpenActionRequestTargetInCms;
+        if (isReport) {
+            a.title = "Open this report";
+            a.onclick = function () {
+                window.parent.postMessage({ mbxOpenReport: true, title: "Dynamic Report: " + (dt.ElemName || "") }, window.location.origin);
+            };
+        }
         row.appendChild(a);
         panel.appendChild(row);
     }, null, true);
-}
-
-function mbxOpenActionRequestTargetInCms() {
-    var w = window.open("", "_blank");
-    fetch("/auth/cms-origin").then(function (r) { return r.json(); }).then(function (o) {
-        if (o && o.origin && w) w.location.href = o.origin;
-        else { if (w) w.close(); xconfirm(null, ["div|Open CMS to view this item."]); }
-    }).catch(function () { if (w) w.close(); xconfirm(null, ["div|Open CMS to view this item."]); });
 }

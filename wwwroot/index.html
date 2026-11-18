@@ -2687,6 +2687,38 @@
             if (kind === "form") frame.addEventListener("load", function () { mbxWatchSaveButtons(frame); });
         }
 
+        // An Action Request record's "Dynamic Report:" link (2026-11-18): close the record and show
+        // the report it points at in this page's report viewer, for the same message item.
+        // DRViewController resolves the report from the record's system link (sql/045), so rows,
+        // edits, notes and attachments follow the same access rules as any shared report.
+        function mbxOpenActionRequestReport(frame, title) {
+            var id = (/[?&]messageItemId=(\d+)/.exec(frame.src) || [])[1];
+            var card = frame.closest(".itemCard");
+            if (!id || !card) return;
+            try {
+                if (document.getElementById("mbxFullscreenSaves").children.length &&
+                    frame.contentDocument && frame.contentDocument.body.classList.contains("mbxDirty") &&
+                    !confirm("Open the report without saving? Your changes to this record will be lost.")) return;
+            } catch (e) { /* not readable yet: nothing to lose */ }
+            mbxClearFullscreen();
+            var view = document.getElementById("drView_" + id);
+            if (!view) {
+                view = document.createElement("div");
+                view.className = "drView mbx-dr-closed";
+                view.id = "drView_" + id;
+                view.setAttribute("data-item", id);
+                card.appendChild(view);
+            }
+            view.classList.remove("mbx-dr-closed");
+            view.removeAttribute("data-loaded");
+            view.innerHTML = "<p class='hint'>Loading report ...</p>";
+            document.getElementById("mbxFullscreenTitle").textContent = title;
+            document.getElementById("mbxCloseBtn").textContent = "Close";
+            document.getElementById("mbxFullscreenHint").textContent = "Click a row to see its details, notes and attachments.";
+            mbxSetFullscreen(view);
+            loadDRViewers();
+        }
+
         function mbxCloseItem() {
             var frame = mbxFullscreenFrame;
             try {
@@ -2803,6 +2835,13 @@
         window.addEventListener("message", function (event) {
             if (event.origin !== window.location.origin) return;
             if (event.data && event.data.mbxActivity) { resetIdle(); return; }
+            // ia-viewer.html's Action Request link (js/InteractiveForm.js mbxShowActionRequestTarget,
+            // 2026-11-18): the open record points at a dynamic report; open it in the report viewer.
+            if (event.data && event.data.mbxOpenReport) {
+                if (mbxFullscreenFrame && mbxFullscreenFrame.contentWindow === event.source)
+                    mbxOpenActionRequestReport(mbxFullscreenFrame, String(event.data.title || "Dynamic Report"));
+                return;
+            }
             // ia-viewer.html's mbxRecordSaved(): a record was just saved. Every save
             // re-opens it in place; only Close closes it (John 2026-11-17 — Save for Use
             // used to close it). Either way refresh the task lines and that line's

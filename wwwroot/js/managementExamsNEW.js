@@ -20,13 +20,13 @@ var jsHeatmapStaticPages = [];
 var MGTLineIDs = [];
 var jsExamCMSFiles = [], selectedCMSFiles = [], MGTUploadDocs_Params = [];
 var tmpCMSFiles = [];
-var isShowHideDocRequestsActive = false;//code:so 20240705 12:11pm;added the isShowHideDocRequestsActive variable to manage state
+var isShowHideDocRequestsActive = true; //code:20261118 John: Document Requests open by default;//code:so 20240705 12:11pm;added the isShowHideDocRequestsActive variable to manage state
 var curExamDocs = [];
 //code:20261103 private (management-only) exam documents - SharedSQLWithClaude/FEATURE_ExamPrivateDocs
 var MgtPrivateDocsEnabled = true; // CMSMailbox's exam viewer sets this false (no Management only box there)
 var MgtDocsMgtView = false;       // caller passes dbo.ftnExamMgtView (NEO_MgtGetExamDocs.MgtView)
 
-let isDocumentActive = false;
+let isDocumentActive = true; //code:20261118 open by default (with isShowHideDocRequestsActive)
 let isRequestActive = false;
 let isScoringActive = false;
 let isLikelihoodActive = false;
@@ -452,7 +452,7 @@ function viewMgtExam(ExamID, xcid, xcompany, snapshot) {
 
         try {
             nsection("ExamOpts", [
-                "button|class=longblueButton|id=auditBtnDR|onclick=showHideDocRequests('" + ExamID + "', " + xcid + ")|Document Request", "label|&nbsp;&nbsp;",
+                "button|class=longblueButton|id=auditBtnDR|style=background-color:" + (isShowHideDocRequestsActive ? "yellow" : "white") + "|onclick=showHideDocRequests('" + ExamID + "', " + xcid + ")|Document Request", "label|&nbsp;&nbsp;",
                 (byFolderCompany == 1 && ((isDownstream(xcid) || (myCID == ExamOwnerCID && xcid != 0))) ? "button|class=longblueButton|id=auditBtnSC|onclick=showHideScoring('" + ExamID + "', " + xcid + ")|Scoring" : ""),
                 (byFolderCompany == 1 && ((isDownstream(xcid) || (myCID == ExamOwnerCID && xcid != 0))) ? "label|&nbsp;&nbsp;" : "")
             ]);
@@ -541,7 +541,7 @@ function viewMgtExam(ExamID, xcid, xcompany, snapshot) {
             nsection("tdAnswer_" + strLineID, [
                 "textarea|style=width:100%|class=ocInput|onchange=MGTAnswerOnchange('" + LineID + "',0)|id=answer_" + strLineID + "_0",
                 "div|style=padding-left:10px; padding:5px|class=answerDetails|id=answerDetails_" + strLineID + "_0",
-                "div|style=padding-left:30px; padding:5px;display:none|class=mgtDocSection|id=answerDocs_" + strLineID,
+                "div|style=padding-left:30px; padding:5px;display:" + (isShowHideDocRequestsActive ? "block" : "none") + "|class=mgtDocSection|id=answerDocs_" + strLineID, //code:20261118 open by default
                 "div|id=tdOtherAnswer_" + strLineID + "|style=background-color:" + bgclr + "; padding:5px; padding-left:30px;",//code: 07222024 5:00pm Add the "tdOtherAnswer_" Div.
             ]);
 
@@ -1399,7 +1399,7 @@ function MGTPopDocs() {
             xsection(sect, [
                 "div|class=docrequest shadowSection|style=padding:5px; font-weight:bold|Document Request: " + js[i].Document_Request +
                 ////code:so 20240705 12:11pm; added the plusBtn class
-                "|||button|class=longblueButton pad10 plusBtn|style=float:right|onclick=MGTUploadDocs(" + xCID + ",'" + ExamID + "','" + LineID + "','" + DocReqID + "')|+",
+                "|||button|class=longblueButton plusBtn|style=margin-left:12px; padding:2px 10px; font-weight:normal|title=Add a document to this request|onclick=MGTUploadDocs(" + xCID + ",'" + ExamID + "','" + LineID + "','" + DocReqID + "')|+ Add Document", //code:20261118 John: + was too far right to notice
                 "div|id=docReq_" + strDocReqID + "|style=padding:10px"
             ]);
 
@@ -1487,7 +1487,7 @@ function MGTPopPrivateDocs() {
         sect.insertBefore(privBox, sect.firstChild);
         xsection(privBox, [
             "div|class=docrequest shadowSection mgtPrivateDocs|style=padding:5px; font-weight:bold; background-color:#fff8e1|&#128274; Documents for Management only (not visible to the examined company)" + //code:20261113 John's wording
-            "|||button|class=longblueButton pad10 plusBtn|style=float:right|onclick=MGTUploadDocs(" + MgtXCID + ",'" + ln.ExamID + "','" + ln.LineID + "',null,null,1)|+",
+            "|||button|class=longblueButton plusBtn|style=margin-left:12px; padding:2px 10px; font-weight:normal|title=Add a Management only document|onclick=MGTUploadDocs(" + MgtXCID + ",'" + ln.ExamID + "','" + ln.LineID + "',null,null,1)|+ Add Document", //code:20261118 next to the title
             "div|id=docPriv_" + ln.strLineID + "|class=mgtPrivateDocs|style=padding:10px"
         ]);
 
@@ -4304,7 +4304,7 @@ function mgtRelEsc(t) {
 function mgtReleaseChanges(btn) {
     var p = MgtPending;
     if (!p || !(p.Total > 0)) return;
-    if (!confirm("Release " + p.Total + " change" + (p.Total == 1 ? "" : "s") + " to this exam?\n\nEveryone who can see this exam will see them.")) return;
+    if (!confirm("Release " + p.Total + " change" + (p.Total == 1 ? "" : "s") + " to this exam?\n\nOnce released, these changes will be visible to all users with access to this exam.")) return; //code:20261118 John: professional wording
     if (btn) { btn.disabled = true; btn.textContent = "Releasing ..."; }
     var examid = MgtExamID, xcid = MgtXCID, xcompany = MgtXCompany;
     getData(null, newFormData("_MgtReleaseExamChanges", { examid: examid, xcid: xcid }), function (vr) {
