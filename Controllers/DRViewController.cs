@@ -37,12 +37,53 @@ namespace CMSMailbox.Controllers
             string reportId = ReportFor(messageItemId, uid);
             if (reportId == null) return NotFound();
 
-            var dat = DB.GetDB("exec NEO_GetDynamicReportsALL2 @uid, @justHdrs, @filter", uid,
-                new JObject { ["justHdrs"] = 0, ["filter"] = "ReportID~" + reportId }.ToString());
-            if (dat.Columns.Contains("err")) return NotFound();
+            // sql/046 (2026-11-18): not NEO_GetDynamicReportsALL2 any more. Since drt_001 that proc
+            // only returns rows to people with the report's type, and with no rows its pivot throws,
+            // so Action Request recipients (usually no Dynamic Reports access) got "couldn't be
+            // loaded". MBX_GetDRItemReportRows re-checks this item and keeps the AccessTreeDown rule.
+            var dat = DB.GetDB("exec MBX_GetDRItemReportRows @uid, @messageItemId", uid,
+                new JObject { ["messageItemId"] = messageItemId }.ToString());
+            if (dat.Columns.Contains("err"))
+            {
+                LogAccess(messageItemId, uid, "Denied", "DR report: MBX_GetDRItemReportRows failed");
+                return NotFound();
+            }
 
-            LogAccess(messageItemId, uid, "Served", "DR report");
-            return Content(JsonConvert.SerializeObject(dat), "application/json");
+            LogAccess(messageItemId, uid, "Served", "DR report (" + dat.Rows.Count + " rows)");
+            return Content(JsonConvert.SerializeObject(NameReportColumns(dat)), "application/json");
+        }
+
+        // Header names NEO_GetDynamicReportsALL2 leaves out of the data columns.
+        private static readonly HashSet<string> SkippedHeaders = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            { "RowID", "ReportID", "FID", "Company_Loaded_By" };
+        private static readonly HashSet<string> MetaColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            { "xxxIX", "xxxID", "xCID", "Company_Loaded_By", "Status", "xxxIsMine", "DR_ReportID", "DR_ReportType", "DR_ReportName", "hdrs", "Attachments" };
+
+        // One object per row: the meta columns, then the report's own columns named from the row's
+        // comma-separated headers (position N = ColN, spaces -> "_", names of 2 characters or less
+        // and the SkippedHeaders left out), the same naming NEO_GetDynamicReportsALL2 uses.
+        private static List<Dictionary<string, object>> NameReportColumns(DataTable dat)
+        {
+            var rows = new List<Dictionary<string, object>>();
+            foreach (DataRow r in dat.Rows)
+            {
+                var o = new Dictionary<string, object>();
+                foreach (var m in MetaColumns)
+                    if (dat.Columns.Contains(m)) o[m] = r[m] == DBNull.Value ? null : r[m];
+
+                var headers = (r["hdrs"] == DBNull.Value ? "" : r["hdrs"].ToString()).Split(',');
+                for (int i = 0; i < headers.Length && i < 100; i++)
+                {
+                    string h = headers[i];
+                    if (h.TrimEnd().Length <= 2 || SkippedHeaders.Contains(h.Trim())) continue;
+                    string name = h.Replace(" ", "_");
+                    if (o.ContainsKey(name) || MetaColumns.Contains(name)) continue;
+                    string col = "Col" + (i + 1);
+                    o[name] = dat.Columns.Contains(col) && r[col] != DBNull.Value ? r[col] : null;
+                }
+                rows.Add(o);
+            }
+            return rows;
         }
 
         // One row: its fields (NEO_GetDynamicReportFile, the same proc CMSNEO's Dynamic
