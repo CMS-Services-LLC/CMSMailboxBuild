@@ -152,6 +152,73 @@ function closePopUp(Title, ix) {
     mbxNotifyPopupState(jsPopUps.length > 0);
 }
 
+// Resize a PopUp from every side and corner (2026-11-18). Replaces CSS resize:both,
+// which only offered the bottom-right corner. Handles sit just inside the popup's
+// edges (it is overflow:hidden), above the contents, and use pointer events so
+// mouse, pen and touch all work. Left/top handles move the popup as they resize it.
+function addPopUpResizers(el, minW, minH) {
+    if (!el || el.getAttribute("data-resizers") == "1") return;
+    el.setAttribute("data-resizers", "1");
+    minW = minW || 220; minH = minH || 120;
+    var E = 6, C = 14; // edge thickness, corner size (px)
+    var defs = [
+        ["n", "top:0;left:" + C + "px;right:" + C + "px;height:" + E + "px;cursor:ns-resize"],
+        ["s", "bottom:0;left:" + C + "px;right:" + C + "px;height:" + E + "px;cursor:ns-resize"],
+        ["w", "left:0;top:" + C + "px;bottom:" + C + "px;width:" + E + "px;cursor:ew-resize"],
+        ["e", "right:0;top:" + C + "px;bottom:" + C + "px;width:" + E + "px;cursor:ew-resize"],
+        ["nw", "top:0;left:0;width:" + C + "px;height:" + C + "px;cursor:nwse-resize"],
+        ["se", "bottom:0;right:0;width:" + C + "px;height:" + C + "px;cursor:nwse-resize"],
+        ["ne", "top:0;right:0;width:" + C + "px;height:" + C + "px;cursor:nesw-resize"],
+        ["sw", "bottom:0;left:0;width:" + C + "px;height:" + C + "px;cursor:nesw-resize"]
+    ];
+    defs.forEach(function (d) {
+        var h = document.createElement("div");
+        h.className = "PopUpResizer PopUpResizer_" + d[0] + " excludePrint";
+        h.style.cssText = "position:absolute;z-index:5;touch-action:none;background:transparent;" + d[1];
+        h.addEventListener("pointerdown", function (e) { popUpResizeStart(e, d[0], h); });
+        h.addEventListener("mousedown", function (e) { e.stopPropagation(); });
+        h.addEventListener("click", function (e) { e.stopPropagation(); });
+        el.appendChild(h);
+    });
+
+    function popUpResizeStart(e, dir, h) {
+        if (e.button != null && e.button !== 0) return;
+        e.preventDefault(); e.stopPropagation();
+        var x0 = e.clientX, y0 = e.clientY;
+        var w0 = el.offsetWidth, h0 = el.offsetHeight, l0 = el.offsetLeft, t0 = el.offsetTop;
+        try { h.setPointerCapture(e.pointerId); } catch (ex) { }
+        var prevSel = document.body.style.userSelect;
+        document.body.style.userSelect = "none";
+        function move(ev) {
+            ev.preventDefault();
+            var dx = ev.clientX - x0, dy = ev.clientY - y0;
+            if (dir.indexOf("e") >= 0) el.style.width = Math.max(minW, w0 + dx) + "px";
+            if (dir.indexOf("s") >= 0) el.style.height = Math.max(minH, h0 + dy) + "px";
+            if (dir.indexOf("w") >= 0) {
+                var nw = Math.max(minW, w0 - dx);
+                el.style.width = nw + "px";
+                el.style.left = (l0 + (w0 - nw)) + "px";
+            }
+            if (dir.indexOf("n") >= 0) {
+                var nh = Math.max(minH, h0 - dy), nt = t0 + (h0 - nh);
+                if (nt < 0) { nh += nt; nt = 0; } // keep the header on screen
+                el.style.height = nh + "px";
+                el.style.top = nt + "px";
+            }
+        }
+        function up() {
+            h.removeEventListener("pointermove", move);
+            h.removeEventListener("pointerup", up);
+            h.removeEventListener("pointercancel", up);
+            document.body.style.userSelect = prevSel;
+            try { window.dispatchEvent(new Event("resize")); } catch (ex) { }
+        }
+        h.addEventListener("pointermove", move);
+        h.addEventListener("pointerup", up);
+        h.addEventListener("pointercancel", up);
+    }
+}
+
 function PopUp(Title, Data, AppendTitle, Scroll, HeightWidth, MC, dontMove) {
     cancelPopUpFocus = true;
     console.log(jsPopUps);
@@ -179,7 +246,7 @@ function PopUp(Title, Data, AppendTitle, Scroll, HeightWidth, MC, dontMove) {
 
         ix = ix * 1;
         nsection(MC, [
-            "div|id=PopUp_" + ix + "|class=PopUp|style=overflow:hidden; resize:both; z-index:" + zindex + ";height:" + HeightWidth[0] + ";width:" + HeightWidth[1]
+            "div|id=PopUp_" + ix + "|class=PopUp|style=overflow:hidden; z-index:" + zindex + ";height:" + HeightWidth[0] + ";width:" + HeightWidth[1]
         ]);
 
         nsection("PopUp_" + ix, [
@@ -193,6 +260,7 @@ function PopUp(Title, Data, AppendTitle, Scroll, HeightWidth, MC, dontMove) {
         ]);
 
         dragElement(document.getElementById("PopUp_" + ix));
+        addPopUpResizers(document.getElementById("PopUp_" + ix));
 
         section("PopUp_" + ix + "_hdrOpts", [
             "label|style=padding-right:10px|id=PopUp_" + ix + "_Opts",//this is where you add extra buttons; i.e. submit, delete, etc
