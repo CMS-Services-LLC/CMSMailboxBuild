@@ -35,6 +35,31 @@ namespace CMSMailbox.Controllers
             return NotFound();
         }
 
+        // "Update an existing report" task (sql/048): the assignee (or a 'manage' colleague) says
+        // the changes are made. MBX_CompleteDRUpdateTask checks it's an open DRUpdate task of theirs.
+        // With "Require my review" it then reads Pending Review until the assigner marks it Completed.
+        [HttpPost("item/{messageItemId:int}/task/done")]
+        public IActionResult Done(int messageItemId)
+        {
+            int uid = CurrentUID();
+            if (uid == 0) return Unauthorized();
+
+            var dat = DB.GetDB("exec MBX_CompleteDRUpdateTask @uid, @messageItemId", uid,
+                new JObject { ["messageItemId"] = messageItemId }.ToString());
+            bool ok = dat.Rows.Count > 0 && !dat.Columns.Contains("err");
+
+            DB.GetDB("exec MBX_LogAccess @messageItemId, @byUid, @result, @detail", uid,
+                new JObject
+                {
+                    ["messageItemId"] = messageItemId,
+                    ["byUid"] = uid,
+                    ["result"] = ok ? "Served" : "Denied",
+                    ["detail"] = ok ? "report update task marked done" : "report update task done refused: " + (dat.Columns.Contains("err") && dat.Rows.Count > 0 ? dat.Rows[0]["err"] : "no result")
+                }.ToString());
+
+            return ok ? Ok() : NotFound();
+        }
+
         // Assignee-side sharing (sql/028): whoever was assigned a task shares it with colleagues in
         // their own company who hold the task's permission. The procs check the caller is the
         // task's assignee and the colleague is a current candidate. (The assigner shares from

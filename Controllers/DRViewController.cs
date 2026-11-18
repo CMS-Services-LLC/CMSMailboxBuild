@@ -37,7 +37,7 @@ namespace CMSMailbox.Controllers
             string reportId = ReportFor(messageItemId, uid);
             if (reportId == null) return NotFound();
 
-            // sql/046 (2026-11-18): not NEO_GetDynamicReportsALL2 any more. Since drt_001 that proc
+            // sql/047 (2026-11-18, first numbered 046): not NEO_GetDynamicReportsALL2 any more. Since drt_001 that proc
             // only returns rows to people with the report's type, and with no rows its pivot throws,
             // so Action Request recipients (usually no Dynamic Reports access) got "couldn't be
             // loaded". MBX_GetDRItemReportRows re-checks this item and keeps the AccessTreeDown rule.
@@ -58,7 +58,8 @@ namespace CMSMailbox.Controllers
         // Upload: the edited file. Every row is matched by RowID to an active row of THIS report,
         // must pass RowAccess with IsMine (the same rule as Submit Changes), and only rows whose
         // values changed are sent to NEO_DynamicRecordUpdate (which re-checks the company and
-        // keeps a history copy). Nothing is added or deleted: rows left out of the file are kept.
+        // keeps a history copy). Rows without a RowID are added as new records (your company's
+        // report only, 2026-11-18). Nothing is deleted: rows left out of the file are kept.
         // (CMSNEO's NEO_UpdateDynamicReports_v4 is deliberately NOT used: it deactivates every row
         // of the report that isn't in the upload, other companies' rows included.)
         private const int BulkMaxRows = 500;          // same cap as CMSNEO's Dynamic Reports upload
@@ -106,6 +107,54 @@ namespace CMSMailbox.Controllers
         // Header names compare the way NEO_DynamicRecordUpdate matches keys (letters/digits/_ only).
         private static string NormHeader(string h) =>
             new string((h ?? "").Trim().Replace(" ", "_").Where(ch => char.IsLetterOrDigit(ch) || ch == '_').ToArray()).ToLowerInvariant();
+
+        // Adding rows (2026-11-18): only the report's own company can (NEO_DynamicRecordUpdate's
+        // @fid = 0 path checks that too). Here: one of the report's rows must pass RowAccess with
+        // IsMine for this item, which also rules out a read-only task share.
+        private bool CanAddRows(int messageItemId, int uid, ReportSnapshot snap)
+        {
+            var mineRow = snap.Rows.FirstOrDefault(r => r.TryGetValue("xxxIsMine", out var m) && m is bool b && b);
+            if (mineRow == null) return false;
+            var access = RowAccess(messageItemId, uid, Convert.ToInt32(mineRow["xxxID"]));
+            return access != null && access.IsMine;
+        }
+
+        private static bool AddRow(int uid, string reportId, List<string> keys, List<string> vals)
+        {
+            var res = DB.GetDB("exec NEO_DynamicRecordUpdate @uid, @fid, @keys, @vals, @reportid", uid,
+                new JObject
+                {
+                    ["fid"] = 0,
+                    ["keys"] = string.Join(",", keys.Select(k => (k ?? "").Replace(",", ""))),
+                    ["vals"] = string.Join("|", vals.Select(v => (v ?? "").Replace("|", ""))),
+                    ["reportid"] = reportId
+                }.ToString());
+            return !res.Columns.Contains("err");
+        }
+
+        // Add Record: { Keys, Vals } with the report's column names, like Submit Changes.
+        [HttpPost("item/{messageItemId:int}/report/rows")]
+        public IActionResult AddRecord(int messageItemId, [FromBody] RowUpdate req)
+        {
+            int uid = CurrentUID();
+            if (uid == 0) return Unauthorized();
+            string reportId = ReportFor(messageItemId, uid);
+            if (reportId == null) return NotFound();
+            if (req?.Keys == null || req.Vals == null || req.Keys.Count != req.Vals.Count) return BadRequest();
+
+            var snap = Snapshot(messageItemId, uid, reportId);
+            if (snap == null || !CanAddRows(messageItemId, uid, snap)) return NotFound();
+
+            // only the report's own columns
+            var keys = new List<string>(); var vals = new List<string>();
+            for (int i = 0; i < req.Keys.Count; i++)
+                if (snap.Columns.Contains(req.Keys[i])) { keys.Add(req.Keys[i]); vals.Add(req.Vals[i] ?? ""); }
+            if (keys.Count == 0 || vals.All(string.IsNullOrWhiteSpace)) return BadRequest();
+
+            if (!AddRow(uid, reportId, keys, vals)) return StatusCode(500);
+            LogAccess(messageItemId, uid, "Served", "DR row added");
+            return Ok();
+        }
 
         [HttpGet("item/{messageItemId:int}/report/export")]
         public IActionResult ExportForUpdate(int messageItemId)
@@ -177,7 +226,8 @@ namespace CMSMailbox.Controllers
             if (map.Count == 0) return Ok(new { status = "no_matching_columns" });
 
             var rowById = snap.Rows.ToDictionary(r => Convert.ToInt32(r["xxxID"]), r => r);
-            int updated = 0, unchanged = 0, noRowId = 0, notFound = 0, notYours = 0, failed = 0;
+            int updated = 0, unchanged = 0, added = 0, noRowId = 0, notFound = 0, notYours = 0, failed = 0;
+            bool? canAdd = null;   // worked out on the first row that needs it
             var problems = new List<string>();
 
             for (int i = 0; i < fileRows.Count; i++)
@@ -185,7 +235,18 @@ namespace CMSMailbox.Controllers
                 var fr = fileRows[i];
                 string line = "row " + (i + 2);
                 string rid = (fr.TryGetValue(rowIdHeader, out var x) ? x : "").Trim();
-                if (rid == "") { noRowId++; continue; }
+                if (rid == "")
+                {
+                    // 2026-11-18: a row with no RowID is a new record (your company's report only).
+                    var nk = new List<string>(); var nvals = new List<string>();
+                    foreach (var (fh, col) in map) { nk.Add(col); nvals.Add((fr.TryGetValue(fh, out var v0) ? v0 : "") ?? ""); }
+                    if (nvals.All(string.IsNullOrWhiteSpace)) continue;
+                    if (canAdd == null) canAdd = CanAddRows(messageItemId, uid, snap);
+                    if (canAdd != true) { noRowId++; if (problems.Count < 10) problems.Add(line + ": new rows can only be added by the report's own company"); continue; }
+                    if (AddRow(uid, reportId, nk, nvals)) added++;
+                    else { failed++; if (problems.Count < 10) problems.Add(line + ": the new row couldn't be added"); }
+                    continue;
+                }
                 if (!snap.IdByRowId.TryGetValue(rid, out int drid) || !rowById.TryGetValue(drid, out var cur))
                 {
                     notFound++; if (problems.Count < 10) problems.Add(line + ": RowID not in this report"); continue;
@@ -219,9 +280,9 @@ namespace CMSMailbox.Controllers
                 else updated++;
             }
 
-            LogAccess(messageItemId, uid, "Served", "DR bulk update: " + updated + " updated, " + unchanged + " unchanged, " +
+            LogAccess(messageItemId, uid, "Served", "DR bulk update: " + updated + " updated, " + added + " added, " + unchanged + " unchanged, " +
                 (notFound + notYours + noRowId + failed) + " skipped");
-            return Ok(new { status = "ok", updated, unchanged, noRowId, notFound, notYours, failed, ignored, problems });
+            return Ok(new { status = "ok", updated, added, unchanged, noRowId, notFound, notYours, failed, ignored, problems });
         }
 
         // Header names NEO_GetDynamicReportsALL2 leaves out of the data columns.

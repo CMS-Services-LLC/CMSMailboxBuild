@@ -1177,11 +1177,12 @@
         var TASK_INSTRUCTIONS = {
             FormApplication: "Fill out this form and click Save for Use.",
             DynamicReport: "Fill in the Excel template and upload it.",
+            DRUpdate: "Open the report, make the changes described in the message, then click Mark as Done.",
             Exam: "Answer the exam questions and supply the requested documents."
         };
         function typeIconHtml(kind) {
             return MBX_ICONS[kind === "Exam" || kind === "ExamTask" || kind === "ExamRef" ? "exam"
-                : kind === "DynamicReport" || kind === "DRTask" ? "report" : "form"];
+                : kind === "DynamicReport" || kind === "DRTask" || kind === "DRUpdate" ? "report" : "form"];
         }
         // One Related Tasks row: [status] | [icon] [body]. Used for the open message's item
         // cards (renderMessage / refreshTaskCards) so their existing contents keep working.
@@ -1213,7 +1214,7 @@
         // A task on ANOTHER message of the conversation (sql/035), as a Related Tasks row.
         // Open goes to that message, where the task's own card (and its record) lives.
         function otherTaskRowHtml(t, from) {
-            var what = { FormApplication: "Form application", DynamicReport: "Dynamic report", Exam: "Exam" };
+            var what = { FormApplication: "Form application", DynamicReport: "Dynamic report", DRUpdate: "Dynamic report update", Exam: "Exam" };
             var st = t.TaskStatus || "Open";
             var name = t.TaskType === "Exam" && t.ExamName ? t.ExamName : (t.ItemLabel || what[t.TaskType] || "Task");
             var where = from ? "On the message from " + escapeHtml(from.FromName || "") + ", " + escapeHtml(mbxShortTime(from.DTCreated)) : "";
@@ -1732,6 +1733,11 @@
                     card.setAttribute("data-task-status", item.TaskStatus || "");
                     card.innerHTML = drCardHtml(item);
                     itemsArea.appendChild(card);
+                } else if (item.ItemType === "DynamicReport" && item.TaskID && item.TaskType === "DRUpdate") {
+                    // "Update an existing report" task (sql/048) — see drUpdateCardHtml().
+                    card.setAttribute("data-task-status", item.TaskStatus || "");
+                    card.innerHTML = drUpdateCardHtml(item);
+                    itemsArea.appendChild(card);
                 } else if (item.ItemType === "DynamicReport") {
                     // A completed report carried onto a reply (sql/010) — no task.
                     card.innerHTML = originBannerHtml(item) + reviewBarHtml(item) + drViewerHtml(item);
@@ -1849,7 +1855,7 @@
             if (!item.OriginTaskStatus || item.ReviewTaskItemID) return "";
             var st = item.OriginTaskStatus;
             var done = st === "Completed", pending = st === "Pending Review", cancelled = st === "Cancelled";
-            var what = { FormApplication: "Form application task", DynamicReport: "Dynamic report task", Exam: "Exam task" }[item.OriginTaskType] || "Task";
+            var what = { FormApplication: "Form application task", DynamicReport: "Dynamic report task", DRUpdate: "Dynamic report update task", Exam: "Exam task" }[item.OriginTaskType] || "Task";
             return "<div class='taskBanner'><div class='tbLine'>" + what + " (this message carries its record)" +
                 (st === "Saved" ? ". Saved, waiting for Save for Use." : "") + "</div>" + dueLineHtml(item.OriginDueDate, st) + "</div>";
         }
@@ -1937,6 +1943,41 @@
             return html;
         }
 
+        // "Update an existing report" task card (sql/048): the report itself (Open shows the report
+        // viewer: edit rows, Add Record, Export for Update / Upload Changes), then Mark as Done.
+        function drUpdateCardHtml(item) {
+            var html = taskBanner(item) + drViewerHtml(item, item.ItemLabel || "Dynamic Report");
+            var id = item.MessageItemID;
+            if (item.TaskStatus === "Cancelled") {
+                html += "<p class='hint'>The sender cancelled this task.</p>";
+            } else if (!item.IsMyTask) {
+                html += "<p class='hint'>Only the assignee, or a colleague they gave Manage access, can mark this task done. You can follow it here.</p>";
+            } else if (item.TaskStatus === "Open") {
+                html += "<div style='margin-top:8px'><button class='primary' id='drDone_" + id + "' onclick='markDRUpdateDone(" + id + ")'>Mark as Done</button>" +
+                    " <span class='hint'>when the changes in the message are made.</span><div class='err' id='drDoneMsg_" + id + "'></div></div>";
+            } else {
+                html += "<p class='hint'>You marked this task done." + (item.TaskStatus === "Pending Review" ? " It's waiting for the sender's review." : "") + "</p>";
+            }
+            return html;
+        }
+
+        function markDRUpdateDone(messageItemId) {
+            if (!confirm("Mark this task as done? Make sure every change in the message has been made.")) return;
+            var btn = document.getElementById("drDone_" + messageItemId);
+            var msg = document.getElementById("drDoneMsg_" + messageItemId);
+            btn.disabled = true;
+            api("/item/" + messageItemId + "/task/done", { method: "POST" })
+                .then(function (r) {
+                    if (r.status === 401) { logout(); throw new Error("unauthorized"); }
+                    if (!r.ok) throw new Error("refused");
+                    refreshTaskCards();
+                })
+                .catch(function () {
+                    btn.disabled = false;
+                    msg.innerText = "This task couldn't be marked done. Refresh the message and try again.";
+                });
+        }
+
         // After one task changes (a form's first save, a report upload), refresh just
         // the task lines and Dynamic Report cards — never re-render the whole message,
         // since a message can hold several tasks and the other forms' iframes may have
@@ -1961,6 +2002,10 @@
                         }
                         if (item.ItemType === "DRTask") {
                             if (statusChanged) { card.innerHTML = drCardHtml(item); wrapCard(card, item); }
+                            return;
+                        }
+                        if (item.TaskType === "DRUpdate") {
+                            if (statusChanged) { card.innerHTML = drUpdateCardHtml(item); wrapCard(card, item); }
                             return;
                         }
                         var pillBox = card.querySelector(".icStatus");
@@ -1989,6 +2034,7 @@
             var what = formNotCreated ? "Form Application sent to be filled out" : {
                 FormApplication: "Fill out this form and click Save for Use",
                 DynamicReport: "Fill in the Excel template and upload it",
+                DRUpdate: "Open the report, make the changes described in the message, then click Mark as Done",
                 Exam: "Answer the exam questions and supply the requested documents"
             }[item.TaskType] || "Task";
             var statusText = formNotCreated ? "Record not yet created" : {
@@ -2460,11 +2506,55 @@
             var summary = drBulkSummary[messageItemId] || "";
             delete drBulkSummary[messageItemId];
             return "<div class='drBulkBar' style='display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:8px 0 4px'>" +
+                "<button type='button' class='textLink' onclick='drAddRecordForm(" + messageItemId + ")'>Add Record</button>" +
                 "<button type='button' class='textLink' onclick='drBulkExport(" + messageItemId + ")'>Export for Update</button>" +
                 "<button type='button' class='textLink' onclick='document.getElementById(\"drBulkFile_" + messageItemId + "\").click()'>Upload Changes</button>" +
                 "<input type='file' id='drBulkFile_" + messageItemId + "' accept='.xlsx' style='display:none' onchange='drBulkUpload(" + messageItemId + ", this)' />" +
-                "<span class='hint' style='margin:0'>Export your company's rows, edit them in Excel (keep the RowID column and headers), then upload the file.</span>" +
+                "<span class='hint' style='margin:0'>Export your company's rows, edit them in Excel (keep the RowID column and headers; leave RowID empty on new rows), then upload the file.</span>" +
                 "</div><div id='drBulkMsg_" + messageItemId + "'>" + summary + "</div>";
+        }
+
+        // Add Record (2026-11-18): one new row of your company's report. The server adds it with
+        // NEO_DynamicRecordUpdate (only the report's own company can).
+        function drAddRecordForm(messageItemId) {
+            var t = drTables[messageItemId];
+            var panel = document.getElementById("drPanel_" + messageItemId);
+            if (!t || !panel) return;
+            var cols = t.cols.filter(function (c) { return ["Company_Loaded_By", "Status", "Attachments"].indexOf(c) === -1; });
+            var html = "<div class='drPanel'><button class='linkBtn' style='float:right' onclick='closeDRRow(" + messageItemId + ")'>Close</button>" +
+                "<h4 style='margin-top:0'>Add Record</h4><table class='drFields' style='width:100%'>";
+            cols.forEach(function (c) {
+                var isDate = c.toLowerCase().indexOf("date") > -1;
+                html += "<tr><td style='width:30%;white-space:nowrap'>" + escapeHtml(c.trim().replace(/_/g, " ")) + "</td>" +
+                    "<td><input name='drNew_" + messageItemId + "' data-key='" + escapeHtml(c) + "'" + (isDate ? " type='date'" : "") + " /></td></tr>";
+            });
+            html += "</table><button class='primary' id='drNewSave_" + messageItemId + "' onclick='drAddRecordSave(" + messageItemId + ")'>Add Record</button> " +
+                "<span class='err' id='drNewMsg_" + messageItemId + "'></span></div>";
+            panel.innerHTML = html;
+            panel.scrollIntoView({ block: "nearest" });
+        }
+
+        function drAddRecordSave(messageItemId) {
+            var keys = [], vals = [];
+            document.querySelectorAll("input[name='drNew_" + messageItemId + "']").forEach(function (inp) {
+                keys.push(inp.getAttribute("data-key"));
+                vals.push(inp.value.replace(/\|/g, ""));
+            });
+            var msg = document.getElementById("drNewMsg_" + messageItemId);
+            if (vals.every(function (v) { return v.trim() === ""; })) { msg.innerText = "Fill in at least one field."; return; }
+            var btn = document.getElementById("drNewSave_" + messageItemId);
+            btn.disabled = true;
+            api("/item/" + messageItemId + "/report/rows", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ Keys: keys, Vals: vals })
+            })
+                .then(function (r) {
+                    if (r.status === 401) { logout(); throw new Error("unauthorized"); }
+                    if (!r.ok) throw new Error("refused");
+                    drBulkSummary[messageItemId] = "<p class='hint' style='margin:6px 0'>Record added.</p>";
+                    loadDRReport(messageItemId);
+                })
+                .catch(function () { btn.disabled = false; msg.innerText = "The record couldn't be added."; });
         }
 
         function drBulkExport(messageItemId) {
@@ -2512,11 +2602,12 @@
                         no_matching_columns: "None of the file's column headers match this report's columns."
                     };
                     if (res.status !== "ok") { msg.innerHTML = "<p class='err'>" + escapeHtml(errs[res.status] || "The upload failed.") + "</p>"; return; }
-                    var parts = ["<b>" + res.updated + "</b> row" + (res.updated === 1 ? "" : "s") + " updated", res.unchanged + " unchanged"];
+                    var parts = ["<b>" + res.updated + "</b> row" + (res.updated === 1 ? "" : "s") + " updated"];
+                    if (res.added) parts.push("<b>" + res.added + "</b> added");
+                    parts.push(res.unchanged + " unchanged");
                     var skipped = res.notYours + res.notFound + res.noRowId + res.failed;
                     if (skipped) parts.push(skipped + " skipped");
                     var html = "<p class='" + (skipped ? "err" : "hint") + "' style='margin:6px 0'>" + parts.join(", ") + ".";
-                    if (res.noRowId) html += " Rows without a RowID aren't added here; use CMS to add rows.";
                     if (res.ignored && res.ignored.length) html += " Ignored columns: " + res.ignored.map(escapeHtml).join(", ") + ".";
                     html += "</p>";
                     if (res.problems && res.problems.length) html += "<p class='hint' style='margin:0'>" + res.problems.map(escapeHtml).join("<br>") + "</p>";
