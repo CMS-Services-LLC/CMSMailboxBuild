@@ -935,7 +935,7 @@
                         btn.disabled = false;
                         btn.innerText = "Forward";
                         err.innerText = {
-                            not_allowed: "Only a direct recipient of this message can forward it.",
+                            not_allowed: "Only the sender or a direct recipient of this message can forward it.",
                             recipient_not_allowed: "One of those people isn't in your company.",
                             recipients_required: "Choose at least one person."
                         }[res.status] || "The message couldn't be forwarded.";
@@ -1599,6 +1599,11 @@
             // view of just that task (the server sends only its item), without reply or archive.
             var assigneeShare = msg.AssigneeSharedAccess || "";
             var worksAsRecipient = isRecipient || !!assigneeShare;
+            // 2026-11-18 (sql/050): the message's own author (Sent) can Reply and Forward too. Reply goes
+            // to everyone else on the message (MBX_SendReply's rule); Forward to colleagues in their company.
+            // Not a colleague a task was shared with, and not a Global Administrator viewing it.
+            var isAuthor = !isRecipient && !msg.SharedAccess && !assigneeShare && !msg.AdminAccess;
+            var canReply = isRecipient || isAuthor;
 
             currentItems = items;
             // 2026-11-18 redesign (rev 2): fixed header. CMS Services logo left; Archive / Forward
@@ -1610,8 +1615,10 @@
                 "<img class='mhLogo' src='images/logo_1704.png' alt='CMS Services: Simplify Compliance... Improve Performance' />" +
                 "<div class='mhRight'><div class='mhActions'>" +
                 (isRecipient
-                    ? "<button type='button' class='iconBtn' onclick='archiveCurrent()' aria-label='" + (currentArchived ? "Move to Inbox" : "Archive") + "' title='" + (currentArchived ? "Move to Inbox" : "Archive") + "'>" + (currentArchived ? MBX_ICONS.unarchive : MBX_ICONS.archive) + "</button>" +
-                      "<button type='button' class='iconBtn' onclick='openForward(" + msg.MessageID + ")' aria-label='Forward' title='Forward: send a copy to colleagues in your company'>" + MBX_ICONS.forward + "</button>"
+                    ? "<button type='button' class='iconBtn' onclick='archiveCurrent()' aria-label='" + (currentArchived ? "Move to Inbox" : "Archive") + "' title='" + (currentArchived ? "Move to Inbox" : "Archive") + "'>" + (currentArchived ? MBX_ICONS.unarchive : MBX_ICONS.archive) + "</button>"
+                    : "") +
+                (canReply
+                    ? "<button type='button' class='iconBtn' onclick='openForward(" + msg.MessageID + ")' aria-label='Forward' title='Forward: send a copy to colleagues in your company'>" + MBX_ICONS.forward + "</button>"
                     : "") +
                 "<div class='mbxMenuWrap'><button type='button' class='iconBtn' id='msgMoreBtn' aria-label='More actions' title='More actions' aria-haspopup='true' aria-expanded='false' aria-controls='msgMoreMenu' onclick='toggleMoreMenu()'>" + MBX_ICONS.more + "</button>" +
                 "<div class='mbxMenu' id='msgMoreMenu' role='menu' hidden>" +
@@ -1620,9 +1627,9 @@
                 "</div></div></div>" +
                 "<div class='mhSub'>" + MBX_ICONS.lock + "<span>Secure message &middot; <span id='msgCount'>1 message</span></span></div></div></div>" +
                 "<div class='mhSubject'><span class='mhLabel'>Subject:</span><span class='mhValue'>" + escapeHtml(subject) + "</span>" +
-                (isRecipient ? "<span class='mhSep' aria-hidden='true'></span><button type='button' class='textLink' id='replySubjectToggle' aria-expanded='false' aria-controls='replySubjectRow' onclick='toggleReplySubject()'>Edit subject</button>" : "") +
+                (canReply ? "<span class='mhSep' aria-hidden='true'></span><button type='button' class='textLink' id='replySubjectToggle' aria-expanded='false' aria-controls='replySubjectRow' onclick='toggleReplySubject()'>Edit subject</button>" : "") +
                 "</div>" +
-                (isRecipient ? "<div id='replySubjectRow' hidden><label for='replySubject'>Subject of your reply</label>" +
+                (canReply ? "<div id='replySubjectRow' hidden><label for='replySubject'>Subject of your reply</label>" +
                     "<input id='replySubject' value='Re: " + escapeHtml(stripRe(msg.Subject)) + "' />" +
                     "<button type='button' class='textLink' onclick='toggleReplySubject()'>Done</button>" +
                     "<div class='hint'>Changes the subject of the reply you send. This conversation's subject stays the same.</div></div>" : "") +
@@ -1658,9 +1665,9 @@
             html += "</div>";
             // Deliberately OUTSIDE #messageScroll, as a fixed sibling — see the
             // #replyBox/#messageScroll CSS comment above.
-            if (isRecipient) {
+            if (canReply) {
                 html += "<div id='replyBox'><div class='composer'>" +
-                    "<div class='cmpLabel'><label for='replyBody'>Reply to " + escapeHtml(msg.FromName || "sender") + "</label></div>" +
+                    "<div class='cmpLabel'><label for='replyBody'>Reply to " + escapeHtml((isRecipient ? msg.FromName : msg.ToNames) || (isRecipient ? "sender" : "recipients")) + "</label></div>" +
                     "<textarea id='replyBody' placeholder='Write a reply…' rows='2' oninput='updateReplyButton(); growReplyBody()' onkeydown='if ((event.ctrlKey || event.metaKey) && event.key === \"Enter\") { event.preventDefault(); sendReply(); }'></textarea>" +
                     "<span class='attachChips' id='replyFiles'></span>" +
                     "<div class='cmpActions'>" +
