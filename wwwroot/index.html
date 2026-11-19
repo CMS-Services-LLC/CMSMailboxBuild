@@ -24,6 +24,8 @@
         #lgCard h2 { font-size: 26px; font-weight: 700; color: #1a2a4a; text-align: center; margin: 0 0 4px; }
         #lgSubTitle { text-align: center; color: #6b7280; font-size: 14px; margin-bottom: 14px; }
         #lgSameCreds { background: #eff6ff; border: 1.5px solid #bfdbfe; border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; font-size: 13px; color: #1e40af; line-height: 1.5; }
+        #lgSameCreds > div + div { margin-top: 4px; }
+        #lgSameCreds .lgCredsNote { margin-top: 8px; padding-top: 6px; border-top: 1px solid #bfdbfe; }
         #lgConsent { text-align: center; font-size: 12px; color: #6b7280; margin: 10px auto 6px; max-width: 480px; line-height: 1.65; }
         #lgConsent a, .lgLegalLinks a { color: #2563eb; font-weight: 500; text-decoration: none; }
         #lgConsent a:hover, .lgLegalLinks a:hover { text-decoration: underline; }
@@ -363,7 +365,11 @@
         <div id="lgCard">
         <h2>Sign In</h2>
         <div id="lgSubTitle">CMS Secure Mailbox</div>
-        <div id="lgSameCreds"><b>Use the same username and password you use for the CMS Portal.</b> There is no separate Secure Mailbox account.</div>
+        <div id="lgSameCreds">
+            <div><b>CMS Portal users:</b> Use your existing credentials.</div>
+            <div><b>New users:</b> Use the credentials included in your Welcome email.</div>
+            <div class="lgCredsNote"><b>Note:</b> &ldquo;Reset password&rdquo; changes your password for both CMS Secure Email and the CMS Portal.</div>
+        </div>
         <div id="loginStep">
             <input id="username" placeholder="Username" autocomplete="username" onkeyup="if (event.key === 'Enter') doLogin()" />
             <input id="password" type="password" placeholder="Password" autocomplete="current-password" onkeyup="if (event.key === 'Enter') doLogin()" />
