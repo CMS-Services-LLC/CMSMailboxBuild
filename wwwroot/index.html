@@ -13,10 +13,35 @@
            producing two visible scrollbars instead of one. */
         html, body { height: 100%; overflow: hidden; }
         body { font-family: Segoe UI, Arial, sans-serif; margin: 0; background: #f4f6f8; color: #222; }
-        #loginScreen { max-width: 360px; margin: 80px auto; background: #fff; padding: 24px; border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        /* Login page laid out like the CMS portal sign-in (CMS login.js / site.css .lg-*):
+           logo banner, card, consent line, "Authorized Access Only" banner + disclaimer,
+           footer. #loginScreen itself scrolls because html/body are overflow:hidden. */
+        #loginScreen { height: 100vh; overflow-y: auto; box-sizing: border-box; background: #f4f5f7; }
+        #lgBanner { background: #fff; border-bottom: 1px solid #e2e8f0; padding: 8px 16px; text-align: center; }
+        #lgBanner img { max-width: 300px; width: 100%; height: auto; display: inline-block; vertical-align: middle; }
+        #lgOuter { display: flex; flex-direction: column; align-items: center; padding: 24px 16px 32px; box-sizing: border-box; }
+        #lgCard { width: 100%; max-width: 480px; background: #fff; padding: 20px 36px 16px; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.08), 0 1px 3px rgba(0,0,0,0.05); box-sizing: border-box; }
+        #lgCard h2 { font-size: 26px; font-weight: 700; color: #1a2a4a; text-align: center; margin: 0 0 4px; }
+        #lgSubTitle { text-align: center; color: #6b7280; font-size: 14px; margin-bottom: 14px; }
+        #lgSameCreds { background: #eff6ff; border: 1.5px solid #bfdbfe; border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; font-size: 13px; color: #1e40af; line-height: 1.5; }
+        #lgConsent { text-align: center; font-size: 12px; color: #6b7280; margin: 10px auto 6px; max-width: 480px; line-height: 1.65; }
+        #lgConsent a, .lgLegalLinks a { color: #2563eb; font-weight: 500; text-decoration: none; }
+        #lgConsent a:hover, .lgLegalLinks a:hover { text-decoration: underline; }
+        #lgLegalBanner { width: 100%; max-width: 1000px; display: flex; align-items: center; gap: 8px; padding: 4px 8px; margin-top: 6px; background: #f8fafc; border: 1.5px solid #e2e8f0; border-bottom-color: transparent; border-radius: 8px 8px 0 0; font-size: 13px; font-weight: 600; color: #374151; box-sizing: border-box; }
+        #lgLegalBanner svg { color: #2563eb; flex-shrink: 0; }
+        #lgLegalPanel { width: 100%; max-width: 1000px; background: #f8fafc; border: 1.5px solid #e2e8f0; border-top: none; border-radius: 0 0 8px 8px; padding: 10px 16px 0; font-size: 12px; color: #4b5563; line-height: 1.4; box-sizing: border-box; }
+        #lgLegalPanel p { margin: 0 0 6px; }
+        .lgLegalLinks { margin-top: 8px; padding: 6px 0 10px; border-top: 1px solid #e2e8f0; display: flex; flex-wrap: wrap; align-items: center; }
+        .lgLegalLinks .sep { color: #cbd5e1; margin: 0 8px; }
+        #lgFooter { text-align: center; margin-top: 20px; color: #6b7280; font-size: 0.8rem; }
+        @media (max-width: 520px) {
+            #lgOuter { padding: 0 0 24px; }
+            #lgCard { border-radius: 0; box-shadow: none; padding: 18px 20px 20px; }
+            #lgLegalBanner, #lgLegalPanel { border-radius: 0; border-left: none; border-right: none; }
+        }
         #loginScreen input { width: 100%; padding: 8px; margin: 6px 0 14px; box-sizing: border-box; }
-        #loginScreen button { width: 100%; padding: 10px; background: #2c6bd6; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
-        #forgotLink { display: block; margin-top: 10px; text-align: center; font-size: 13px; color: #2c6bd6; cursor: pointer; text-decoration: underline; background: none; border: none; width: auto; padding: 0; }
+        #loginScreen button { width: 100%; padding: 10px; background: #447ea1; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; }
+        #loginScreen #forgotLink { display: block; margin: 10px auto 0; text-align: center; font-size: 13px; color: #2563eb; font-weight: 500; cursor: pointer; text-decoration: underline; background: none; border: none; width: auto; padding: 0; }
         #forgotHelp { display: none; margin-top: 12px; padding: 12px; background: #f6f8fb; border: 1px solid #dde3ec; border-radius: 4px; font-size: 13px; color: #333; }
         #forgotHelp p { margin: 0 0 8px; }
         #forgotHelp ul { margin: 4px 0 8px; padding-left: 18px; }
@@ -331,7 +356,14 @@
     </div>
 
     <div id="loginScreen">
-        <h2>CMS Secure Mailbox</h2>
+        <!-- Banner + disclaimer copied from the CMS portal sign-in (CMS wwwroot/js/login.js
+             loadLogin); keep the wording in step with it. Policy links go to the portal. -->
+        <div id="lgBanner"><img src="images/logo_1704.png" alt="CMS Services: Simplify Compliance... Improve Performance" /></div>
+        <div id="lgOuter">
+        <div id="lgCard">
+        <h2>Sign In</h2>
+        <div id="lgSubTitle">CMS Secure Mailbox</div>
+        <div id="lgSameCreds"><b>Use the same username and password you use for the CMS Portal.</b> There is no separate Secure Mailbox account.</div>
         <div id="loginStep">
             <input id="username" placeholder="Username" autocomplete="username" onkeyup="if (event.key === 'Enter') doLogin()" />
             <input id="password" type="password" placeholder="Password" autocomplete="current-password" onkeyup="if (event.key === 'Enter') doLogin()" />
@@ -360,6 +392,31 @@
             <button onclick="doVerify2fa()">Verify</button>
         </div>
         <div class="err" id="loginError"></div>
+        </div>
+        <div id="lgConsent">
+            <b>By signing in, you agree to the</b>
+            <a href="https://portal.cms-services.net/terms" target="_blank" rel="noopener">Terms of Service</a>
+            <b>and</b>
+            <a href="https://portal.cms-services.net/privacyPage" target="_blank" rel="noopener">Privacy Policy</a>.
+        </div>
+        <div id="lgLegalBanner">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            <span>Authorized Access Only</span>
+        </div>
+        <div id="lgLegalPanel">
+            <p>This system is restricted to authorized users acting within the scope of their assigned responsibilities. Access to and use of this system may be monitored, recorded, and audited. Unauthorized access or misuse is prohibited and may result in termination of access, disciplinary action, civil liability, and/or criminal prosecution.</p>
+            <p>Except as expressly set forth in a written agreement, the CMS portal is provided "AS IS" and "AS AVAILABLE" without warranties of any kind.</p>
+            <p>This site uses essential cookies required for authentication, security, and operation of the portal. By signing in, you acknowledge the use of these cookies as described in the <a href="https://portal.cms-services.net/privacyPage" target="_blank" rel="noopener" style="color:#2563eb">Privacy Policy</a>.</p>
+            <div class="lgLegalLinks">
+                <a href="https://portal.cms-services.net/terms" target="_blank" rel="noopener">Terms of Use</a><span class="sep">|</span>
+                <a href="https://portal.cms-services.net/privacyPage" target="_blank" rel="noopener">Privacy Policy</a><span class="sep">|</span>
+                <a href="https://portal.cms-services.net/cookie-policy" target="_blank" rel="noopener">Cookie Policy</a><span class="sep">|</span>
+                <a href="https://portal.cms-services.net/access-monitoring-policy" target="_blank" rel="noopener">Access &amp; Monitoring Policy</a>
+            </div>
+        </div>
+        <div id="lgFooter">&copy; <span id="lgYear"></span> CMS Services. All rights reserved.</div>
+        <script>document.getElementById("lgYear").textContent = new Date().getFullYear();</script>
+        </div>
     </div>
 
     <div id="appScreen">
